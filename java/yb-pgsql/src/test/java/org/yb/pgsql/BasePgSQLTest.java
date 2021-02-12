@@ -416,23 +416,38 @@ public class BasePgSQLTest extends BaseMiniClusterTest {
     }
   }
 
-  protected AggregatedValue getStatementStat(String statName) throws Exception {
+  protected YSQLStat getStatementStatFromAnyTserver(String statName) throws Exception {
+    YSQLStat ysqlStat = null;
+    for (MiniYBDaemon ts : miniCluster.getTabletServers().values()) {
+      ysqlStat = getStatementStat(statName, ts.getLocalhostIP(),
+                                  ts.getPgsqlWebPort());
+      if (ysqlStat != null)
+        break;
+    }
+    return ysqlStat;
+  }
+
+  protected YSQLStat getStatementStat(String statName, String ip,
+                                      int port) throws Exception {
+    URL url = new URL(String.format("http://%s:%d/statements", ip, port));
+    Scanner scanner = new Scanner(url.openConnection().getInputStream());
+    JsonParser parser = new JsonParser();
+    JsonElement tree = parser.parse(scanner.useDelimiter("\\A").next());
+    JsonObject obj = tree.getAsJsonObject();
+    scanner.close();
+    return (new Metrics(obj, true)).getYSQLStat(statName);
+  }
+
+  protected AggregatedValue getStatementStatAggregates(String statName) throws Exception {
     AggregatedValue value = new AggregatedValue();
     for (MiniYBDaemon ts : miniCluster.getTabletServers().values()) {
-      URL url = new URL(String.format("http://%s:%d/statements",
-                                      ts.getLocalhostIP(),
-                                      ts.getPgsqlWebPort()));
-      Scanner scanner = new Scanner(url.openConnection().getInputStream());
-      JsonParser parser = new JsonParser();
-      JsonElement tree = parser.parse(scanner.useDelimiter("\\A").next());
-      JsonObject obj = tree.getAsJsonObject();
-      YSQLStat ysqlStat = new Metrics(obj, true).getYSQLStat(statName);
+      YSQLStat ysqlStat = getStatementStat(statName, ts.getLocalhostIP(),
+                                           ts.getPgsqlWebPort());
       if (ysqlStat != null) {
         value.count += ysqlStat.calls;
         value.value += ysqlStat.total_time;
         value.rows += ysqlStat.rows;
       }
-      scanner.close();
     }
     return value;
   }
@@ -441,7 +456,7 @@ public class BasePgSQLTest extends BaseMiniClusterTest {
                                      int stmtMetricDelta, boolean validStmt) throws Exception {
     long oldValue = 0;
     if (statName != null) {
-      oldValue = getStatementStat(statName).count;
+      oldValue = getStatementStatAggregates(statName).count;
     }
 
     if (validStmt) {
@@ -452,7 +467,7 @@ public class BasePgSQLTest extends BaseMiniClusterTest {
 
     long newValue = 0;
     if (statName != null) {
-      newValue = getStatementStat(statName).count;
+      newValue = getStatementStatAggregates(statName).count;
     }
 
     assertEquals(oldValue + stmtMetricDelta, newValue);
@@ -464,14 +479,14 @@ public class BasePgSQLTest extends BaseMiniClusterTest {
       stmt.execute(sql);
     }
 
-    long newValue = getStatementStat(statName).count;
+    long newValue = getStatementStatAggregates(statName).count;
     assertEquals(oldValue + numLoops, newValue);
   }
 
   protected void verifyStatementStatWithReset(Statement stmt, String sql, String statName,
                                               long numLoopsBeforeReset, long numLoopsAfterReset)
                                                 throws Exception {
-    long oldValue = getStatementStat(statName).count;
+    long oldValue = getStatementStatAggregates(statName).count;
     verifyStatementStats(stmt, sql, statName, numLoopsBeforeReset, oldValue);
 
     resetStatementStat();

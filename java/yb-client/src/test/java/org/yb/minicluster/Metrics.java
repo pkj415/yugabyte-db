@@ -149,6 +149,8 @@ public class Metrics {
      public final double mean_time;
      public final double stddev_time;
      public final long rows;
+     public final String db_name;
+     public final long db_oid;
 
      /**
       * Constructs a {@code YSQLStat} stat.
@@ -168,6 +170,8 @@ public class Metrics {
       mean_time = metric.get("mean_time").getAsDouble();
       stddev_time = metric.get("stddev_time").getAsDouble();
       rows = metric.get("rows").getAsLong();
+      db_name = metric.get("db_name").getAsString();
+      db_oid = metric.get("db_oid").getAsLong();
      }
    }
 

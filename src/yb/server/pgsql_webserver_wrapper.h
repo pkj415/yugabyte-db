@@ -53,6 +53,8 @@ typedef struct rpczEntry {
 
 typedef struct YsqlStatementStat {
   char   *query;
+  unsigned int db_oid;    /* DB on which query is executed */
+  char   *db_name;
 
   // Prefix of Counters in pg_stat_statements.c.
 

@@ -73,6 +73,12 @@ static void PgMetricsHandler(const Webserver::WebRequest& req,
 }
 
 static void DoWriteStatArrayElemToJson(JsonWriter* writer, YsqlStatementStat* stat) {
+  writer->String("db_oid");
+  writer->Uint(stat->db_oid);
+
+  writer->String("db_name");
+  writer->String(stat->db_name);
+
   writer->String("query");
   writer->String(stat->query);
 

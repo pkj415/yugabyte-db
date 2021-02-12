@@ -63,6 +63,7 @@
 
 #include "access/hash.h"
 #include "catalog/pg_authid.h"
+#include "commands/dbcommands.h"
 #include "executor/instrument.h"
 #include "funcapi.h"
 #include "mb/pg_wchar.h"
@@ -96,8 +97,34 @@ PG_MODULE_MAGIC;
  */
 #define PGSS_TEXT_FILE	PG_STAT_TMP_DIR "/pgss_query_texts.stat"
 
-/* Magic number identifying the stats file format */
-static const uint32 PGSS_FILE_HEADER = 0x20171004;
+/* Magic number identifying the stats file format - deprecated for reason below
+ *
+ * PGSS_FILE_HEADER (now PGSS_FILE_HEADER_DEPRECATED) is actually a version
+ * number from the original module (authors set this to their commit date). For
+ * Yugabyte we maintain version numbers using PGSS_FILE_HEADER_VERSION* - these
+ * are introduced since we want to start supporting backwards compatibility and
+ * not discard stats after an upgrade.
+ *
+ * 0x20171004 is the last version as in the original module with which this
+ * Yugabyte specific module will maintain backwards compatibility. We are
+ * instead using serial numbers starting from 1 and never expect to hit
+ * PGSS_FILE_HEADER_DEPRECATED.
+ */
+static const uint32 PGSS_FILE_HEADER_DEPRECATED = 0x20171004;
+
+/* PGSS_FILE_HEADER(1) would mean version 1. This is introduced
+ * to handle maintaining backward compatibility in Yugabyte
+ * when this module reads from PGSS_DUMP_FILE file written in
+ * an older version. The original module avoided this by discarding
+ * stats from a file with a different than current version.
+ */
+#define PGSS_FILE_HEADER_VERSION(x) ((uint32) x)
+
+/* When bumping up this, ensure to increment by 1 and add a switch
+ * statement in populateStatsFromFile() to handle file written by the
+ * module in newer version.
+ */
+static const uint32 PGSS_FILE_HEADER_VERSION_LATEST = PGSS_FILE_HEADER_VERSION(1);
 
 /* PostgreSQL major version number, changes in which invalidate all entries */
 static const uint32 PGSS_PG_MAJOR_VERSION = PG_VERSION_NUM / 100;
@@ -173,6 +200,11 @@ typedef struct Counters
  * Note: in event of a failure in garbage collection of the query text file,
  * we reset query_offset to zero and query_len to -1.  This will be seen as
  * an invalid state by qtext_fetch().
+ *
+ * NB: PGSS_DUMP_FILE stores this struct on disk as it is in-memory.
+ * If you are adding/removing fields, make sure to bump up
+ * PGSS_FILE_HEADER_VERSION_LATEST and add a switch case in
+ * populateStatsFromFile() to maintain backwards compatibility.
  */
 typedef struct pgssEntry
 {
@@ -182,6 +214,7 @@ typedef struct pgssEntry
 	int			query_len;		/* # of valid bytes in query string, or -1 */
 	int			encoding;		/* query text encoding */
 	slock_t		mutex;			/* protects the counters only */
+	char		db_name[NAMEDATALEN];	/* Name of database against which query ran */
 } pgssEntry;
 
 /*
@@ -231,6 +264,14 @@ typedef struct pgssJumbleState
 	/* highest Param id we've seen, in order to start normalization correctly */
 	int			highest_extern_param_id;
 } pgssJumbleState;
+
+typedef enum STARTUP_LOAD_STATS_ERROR
+{
+	NO_ERROR = 0,
+	READ_ERROR,
+	DATA_ERROR,
+	WRITE_ERROR
+} STARTUP_LOAD_STATS_ERROR;
 
 /*---- Local variables ----*/
 
@@ -454,20 +495,22 @@ _PG_fini(void)
 	ProcessUtility_hook = prev_ProcessUtility;
 }
 
-static void 
+static void
 resetYsqlStatementStats()
 {
   pg_stat_statements_reset(NULL);
 }
 
-static void 
+static void
 getYsqlStatementStats(void *cb_arg)
 {
 	HASH_SEQ_STATUS hash_seq;
 	char	   *qbuffer = NULL;
 	Size		qbuffer_size = 0;
 	pgssEntry  *entry;
-  YsqlStatementStat tmp;
+	YsqlStatementStat tmp;
+
+	tmp.db_name	= (char *) malloc(NAMEDATALEN);
 
 	qbuffer = qtext_load_file(&qbuffer_size);
 	if (qbuffer == NULL)
@@ -478,31 +521,118 @@ getYsqlStatementStats(void *cb_arg)
 	hash_seq_init(&hash_seq, pgss_hash);
 	while ((entry = hash_seq_search(&hash_seq)) != NULL)
 	{
-    // some entries have 0 calls and strange query text - ignore them
-    if (!entry->counters.calls)
-      continue;
+		// some entries have 0 calls and strange query text - ignore them
+		if (!entry->counters.calls)
+			continue;
 
-    char *qry = qtext_fetch(entry->query_offset, entry->query_len, qbuffer, qbuffer_size);
-    if (qry != NULL)
-    {
-      tmp.query        = qry;
-      tmp.calls        = entry->counters.calls;
+		char *qry = qtext_fetch(entry->query_offset, entry->query_len, qbuffer, qbuffer_size);
+		if (qry != NULL)
+		{
+			tmp.query        = qry;
+			tmp.db_oid       = entry->key.dbid;
+			memset(tmp.db_name, 0, NAMEDATALEN);
+			strcpy(tmp.db_name, entry->db_name);
 
-      tmp.total_time   = entry->counters.total_time;
-      tmp.min_time     = entry->counters.min_time;
-      tmp.max_time     = entry->counters.max_time;
-      tmp.mean_time    = entry->counters.mean_time;
-      tmp.sum_var_time = entry->counters.sum_var_time;
+			tmp.calls        = entry->counters.calls;
 
-      tmp.rows         = entry->counters.rows;
+			tmp.total_time   = entry->counters.total_time;
+			tmp.min_time     = entry->counters.min_time;
+			tmp.max_time     = entry->counters.max_time;
+			tmp.mean_time    = entry->counters.mean_time;
+			tmp.sum_var_time = entry->counters.sum_var_time;
 
-      WriteStatArrayElemToJson(cb_arg, &tmp);
-    }
+			tmp.rows         = entry->counters.rows;
+
+			WriteStatArrayElemToJson(cb_arg, &tmp);
+		}
 	}
 
 	LWLockRelease(pgss->lock);
 
+	free(tmp.db_name);
 	free(qbuffer);
+}
+
+static STARTUP_LOAD_STATS_ERROR
+populateStatsFromFile(FILE *file, FILE *qfile, uint32 header,
+					  int32 num, int buffer_size, char *buffer)
+{
+	int32	i;
+
+	for (i = 0; i < num; i++)
+	{
+		pgssEntry	temp = {{0}};
+		pgssEntry  *entry;
+		Size		query_offset;
+
+		size_t pgss_entry_size;
+
+		switch (header) {
+			case PGSS_FILE_HEADER_DEPRECATED:
+				// Perform sizeof() on the older struct instead of using
+				// offsetof() on the newer fields. Structs have padding and
+				// we don't want to mess with computing the older size ourselves.
+				pgss_entry_size = sizeof(struct
+				{
+					pgssHashKey key;
+					Counters	counters;
+					Size		query_offset;
+					int			query_len;
+					int			encoding;
+					slock_t		mutex;
+				});
+				break;
+
+			case PGSS_FILE_HEADER_VERSION_LATEST:
+				pgss_entry_size = sizeof(pgssEntry);
+				break;
+
+			default:
+				return DATA_ERROR;
+		}
+
+		if (fread(&temp, pgss_entry_size, 1, file) != 1)
+			return READ_ERROR;
+
+		/* Encoding is the only field we can easily sanity-check */
+		if (!PG_VALID_BE_ENCODING(temp.encoding))
+			return DATA_ERROR;
+
+		/* Resize buffer as needed */
+		if (temp.query_len >= buffer_size)
+		{
+			buffer_size = Max(buffer_size * 2, temp.query_len + 1);
+			buffer = repalloc(buffer, buffer_size);
+		}
+
+		if (fread(buffer, 1, temp.query_len + 1, file) != temp.query_len + 1)
+			return READ_ERROR;
+
+		/* Should have a trailing null, but let's make sure */
+		buffer[temp.query_len] = '\0';
+
+		/* Skip loading "sticky" entries */
+		if (temp.counters.calls == 0)
+			continue;
+
+		/* Store the query text */
+		query_offset = pgss->extent;
+		if (fwrite(buffer, 1, temp.query_len + 1, qfile) != temp.query_len + 1)
+			return WRITE_ERROR;
+
+		pgss->extent += temp.query_len + 1;
+
+		/* make the hashtable entry (discards old entries if too many) */
+		entry = entry_alloc(&temp.key, query_offset, temp.query_len,
+							temp.encoding,
+							false);
+
+		/* copy in the actual stats */
+		entry->counters = temp.counters;
+		strcpy(entry->db_name, temp.db_name);
+	}
+
+	return 0;
 }
 
 /*
@@ -521,9 +651,8 @@ pgss_shmem_startup(void)
 	uint32		header;
 	int32		num;
 	int32		pgver;
-	int32		i;
 	int			buffer_size;
-	char	   *buffer = NULL;
+	char		*buffer = NULL;
 
 	if (prev_shmem_startup_hook)
 		prev_shmem_startup_hook();
@@ -624,53 +753,22 @@ pgss_shmem_startup(void)
 		fread(&num, sizeof(int32), 1, file) != 1)
 		goto read_error;
 
-	if (header != PGSS_FILE_HEADER ||
-		pgver != PGSS_PG_MAJOR_VERSION)
+	// TODO: For newer postgres versions, try to handle
+	// handle it in a best effort manner if possbile instead
+	// of just discarding the results.
+	if (pgver != PGSS_PG_MAJOR_VERSION)
 		goto data_error;
 
-	for (i = 0; i < num; i++)
-	{
-		pgssEntry	temp;
-		pgssEntry  *entry;
-		Size		query_offset;
-
-		if (fread(&temp, sizeof(pgssEntry), 1, file) != 1)
+	switch (populateStatsFromFile(file, qfile, header, num, buffer_size,
+			buffer)) {
+		case NO_ERROR:
+			break;
+		case READ_ERROR:
 			goto read_error;
-
-		/* Encoding is the only field we can easily sanity-check */
-		if (!PG_VALID_BE_ENCODING(temp.encoding))
+		case DATA_ERROR:
 			goto data_error;
-
-		/* Resize buffer as needed */
-		if (temp.query_len >= buffer_size)
-		{
-			buffer_size = Max(buffer_size * 2, temp.query_len + 1);
-			buffer = repalloc(buffer, buffer_size);
-		}
-
-		if (fread(buffer, 1, temp.query_len + 1, file) != temp.query_len + 1)
-			goto read_error;
-
-		/* Should have a trailing null, but let's make sure */
-		buffer[temp.query_len] = '\0';
-
-		/* Skip loading "sticky" entries */
-		if (temp.counters.calls == 0)
-			continue;
-
-		/* Store the query text */
-		query_offset = pgss->extent;
-		if (fwrite(buffer, 1, temp.query_len + 1, qfile) != temp.query_len + 1)
+		case WRITE_ERROR:
 			goto write_error;
-		pgss->extent += temp.query_len + 1;
-
-		/* make the hashtable entry (discards old entries if too many) */
-		entry = entry_alloc(&temp.key, query_offset, temp.query_len,
-							temp.encoding,
-							false);
-
-		/* copy in the actual stats */
-		entry->counters = temp.counters;
 	}
 
 	pfree(buffer);
@@ -759,7 +857,7 @@ pgss_shmem_shutdown(int code, Datum arg)
 	if (file == NULL)
 		goto error;
 
-	if (fwrite(&PGSS_FILE_HEADER, sizeof(uint32), 1, file) != 1)
+	if (fwrite(&PGSS_FILE_HEADER_VERSION_LATEST, sizeof(uint32), 1, file) != 1)
 		goto error;
 	if (fwrite(&PGSS_PG_MAJOR_VERSION, sizeof(uint32), 1, file) != 1)
 		goto error;
@@ -1279,6 +1377,9 @@ pgss_store(const char *query, uint64 queryId,
 			gc_qtexts();
 	}
 
+	/* Set db_name for entry */
+	strcpy(entry->db_name, get_database_name(MyDatabaseId));
+
 	/* Increment the counts, except when jstate is not NULL */
 	if (!jstate)
 	{
@@ -1759,6 +1860,7 @@ entry_alloc(pgssHashKey *key, Size query_offset, int query_len, int encoding,
 		entry->query_offset = query_offset;
 		entry->query_len = query_len;
 		entry->encoding = encoding;
+		memset(entry->db_name, 0, sizeof(entry->db_name));
 	}
 
 	return entry;

@@ -14,17 +14,21 @@
 package org.yb.pgsql;
 
 import org.yb.minicluster.MiniYBDaemon;
-
-
+import org.yb.minicluster.Metrics.YSQLStat;
+import org.hamcrest.core.IsNull;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.yb.util.YBTestRunnerNonTsanOnly;
 
+import java.net.InetSocketAddress;
+import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.Statement;
 
+import static org.yb.AssertionWrappers.assertNotNull;
+import static org.yb.AssertionWrappers.assertTrue;
 import static org.yb.AssertionWrappers.assertEquals;
 import static org.yb.AssertionWrappers.assertGreaterThanOrEqualTo;
 
@@ -184,6 +188,48 @@ public class TestYSQLMetrics extends BasePgSQLTest {
     stmt      = "INSERT INTO invalid_table VALUES (1)";
     stat_stmt = "INSERT INTO invalid_table VALUES ($1)";
     verifyStatementStat(statement, stmt, stat_stmt, 0, false);
+
+    // Stats should contain db_oid and db_name.
+    // Create a new database so that the following test can rename it and
+    // assert that the new name reflects.
+    String original_db_name = "tempdb";
+    String new_db_name = "tempdb_updated";
+
+    statement.executeUpdate(String.format("CREATE DATABASE %s", original_db_name));
+    Connection conn_original_db = getConnectionBuilder().withDatabase(original_db_name).connect();
+    Statement statement_original_db = conn_original_db.createStatement();
+
+    String original_db_oid_stmt = String.format("SELECT oid FROM pg_database WHERE datname='%s'", original_db_name);
+    String db_oid_stmt_stat = String.format("SELECT oid FROM pg_database WHERE datname=$1");
+
+    long db_oid = getSingleRow(statement_original_db.executeQuery(original_db_oid_stmt)).getLong(0);
+
+    YSQLStat ysqlStat = getStatementStatFromAnyTserver(db_oid_stmt_stat);
+    assertNotNull(ysqlStat);
+    assertEquals(db_oid, ysqlStat.db_oid);
+    assertEquals(original_db_name, ysqlStat.db_name);
+    conn_original_db.close();
+
+    // Stats will contain new database name post rename until the same query
+    // signature is executed again.
+    statement.executeUpdate(String.format("ALTER DATABASE %s RENAME TO %s", original_db_name, new_db_name));
+    Connection conn_original_db2 = getConnectionBuilder().withDatabase(new_db_name).connect();
+    Statement statement_original_db2 = conn_original_db2.createStatement();
+
+    ysqlStat = getStatementStatFromAnyTserver(db_oid_stmt_stat);
+    assertNotNull(ysqlStat);
+    assertEquals(db_oid, ysqlStat.db_oid);
+    assertEquals(original_db_name, ysqlStat.db_name);
+
+    statement_original_db2.executeQuery(original_db_oid_stmt);
+
+    ysqlStat = getStatementStatFromAnyTserver(db_oid_stmt_stat);
+    assertNotNull(ysqlStat);
+    assertEquals(db_oid, ysqlStat.db_oid);
+    assertEquals(new_db_name, ysqlStat.db_name);
+
+    conn_original_db2.close();
+    statement.executeUpdate(String.format("DROP DATABASE %s", new_db_name)); // Cleanup for other tests
   }
 
   @Test
@@ -220,7 +266,7 @@ public class TestYSQLMetrics extends BasePgSQLTest {
           "RETURN 0; END; $$ LANGUAGE PLPGSQL");
       final String query = "EXPLAIN(COSTS OFF, ANALYZE) SELECT func(500)";
       ResultSet result = statement.executeQuery(query);
-      AggregatedValue stat = getStatementStat(query);
+      AggregatedValue stat = getStatementStatAggregates(query);
       assertEquals(1, stat.count);
       while(result.next()) {
         if(result.isLast()) {
@@ -256,7 +302,7 @@ public class TestYSQLMetrics extends BasePgSQLTest {
     statement.executeBatch();
     final double elapsed_local_time = System.currentTimeMillis() - startTimeMillis;
     AggregatedValue metric_after = getMetric(metric_name);
-    AggregatedValue stat = getStatementStat(stat_name);
+    AggregatedValue stat = getStatementStatAggregates(stat_name);
     assertEquals(String.format("Calls count for query %s", query), count, stat.count);
     assertEquals(String.format("'%s' count for query %s", metric_name, query),
                  count,
