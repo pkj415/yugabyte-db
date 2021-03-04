@@ -325,6 +325,9 @@ message IndexInfoPB {
 
   // When backfill fails with error, the first message that it failed with.
   optional string backfill_error_message = 31;
+
+  // Where clause for partial index.
+  optional QLExpressionPB where_clause = 32;
 }
 
 message HostPortPB {

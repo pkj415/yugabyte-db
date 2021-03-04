@@ -19,6 +19,7 @@
 
 #include "yb/client/table.h"
 
+#include "yb/gutil/macros.h"
 #include "yb/yql/cql/ql/ptree/sem_context.h"
 
 DECLARE_bool(use_cassandra_authentication);
@@ -567,6 +568,7 @@ Status WhereExprState::AnalyzeColumnOp(SemContext *sem_context,
           }
           FALLTHROUGH_INTENDED;
         case TreeNodeOpcode::kPTDeleteStmt: {
+          // TODO: Piyush - can we support relation ops on hash column also?
           if (!col_desc->is_primary()) {
             return sem_context->Error(expr,
                 "Non primary key cannot be used in where clause for write requests",
@@ -597,8 +599,8 @@ Status WhereExprState::AnalyzeColumnOp(SemContext *sem_context,
 
     case QL_OP_NOT_IN: FALLTHROUGH_INTENDED;
     case QL_OP_IN: {
-      if (statement_type_ != TreeNodeOpcode::kPTSelectStmt) {
-        return sem_context->Error(expr, "IN expression not supported for write operations",
+      if ((statement_type_ != TreeNodeOpcode::kPTSelectStmt)) {
+        return sem_context->Error(expr, "IN expression not supported for write/ create index operations",
                                   ErrorCode::FEATURE_NOT_YET_IMPLEMENTED);
       }
 

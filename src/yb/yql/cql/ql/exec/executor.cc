@@ -464,6 +464,11 @@ Status Executor::ExecPTNode(const PTCreateTable *tnode) {
         index_info->add_indexed_range_column_ids(col_desc.id());
       }
     }
+    if (index_node->where_clause()) {
+      // TODO: Add a ToString method for PTExpr.
+      LOG(INFO) << "Piyush - where clause present in index " << *index_node->name();
+      RETURN_NOT_OK(PTExprToPB(index_node->where_clause(), index_info->mutable_where_clause()));
+    }
   }
 
   for (const auto& column : tnode->hash_columns()) {
@@ -2086,6 +2091,7 @@ Status Executor::AddIndexWriteOps(const PTDmlStmt *tnode,
     values.emplace(schema.column_id(schema.num_hash_key_columns() + i), req.range_column_values(i));
   }
   if (is_upsert) {
+    // TODO(Piyush) - not required, remove dead code?
     for (const auto& column_value : req.column_values()) {
       values.emplace(ColumnId(column_value.column_id()), column_value.expr());
     }
@@ -2106,6 +2112,29 @@ Status Executor::AddIndexWriteOps(const PTDmlStmt *tnode,
       // write/delete yet. The backfill stage will update the index for such entries.
       continue;
     }
+
+    // Check if index predicate is satisfied (in case of partial index)
+    if (index->has_where_clause()) {
+      QLTableRow new_row;
+      for (size_t i = 0; i < schema.num_hash_key_columns(); i++) {
+        new_row.AllocColumn(schema.column_id(i), req.hashed_column_values(i).value());
+      }
+      for (size_t i = 0; i < schema.num_range_key_columns(); i++) {
+        new_row.AllocColumn(schema.column_id(schema.num_hash_key_columns() + i), req.range_column_values(i).value());
+      }
+
+      LOG(INFO) << "Piyush - Checking where clause predicate in AddIndexWriteOps()"
+        " for pk-only index " << index->ToString() << " row= " << new_row.ToString();
+
+      QLExprResult result;
+      QLExpressionPB where_clause_pb(index->where_clause());
+      RETURN_NOT_OK(EvalExpr(where_clause_pb, new_row, result.Writer()));
+      DCHECK(result.Value().has_bool_value());
+      LOG(INFO) << "Piyush - predicate value " << result.Value().bool_value();
+      if (!result.Value().bool_value())
+        continue;
+    }
+
     YBqlWriteOpPtr index_op(is_upsert ? index_table->NewQLInsert() : index_table->NewQLDelete());
     index_op->set_writes_primary_row(true);
     QLWriteRequestPB *index_req = index_op->mutable_request();
@@ -2118,6 +2147,7 @@ Status Executor::AddIndexWriteOps(const PTDmlStmt *tnode,
       } else if (i < index->key_column_count()) {
         *index_req->add_range_column_values() = values.at(indexed_column_id);
       } else if (is_upsert) {
+        // TODO(Piyush): Will we ever reach here for pk-only indexes?
         const auto itr = values.find(indexed_column_id);
         if (itr != values.end()) {
           QLColumnValuePB* column_value = index_req->add_column_values();

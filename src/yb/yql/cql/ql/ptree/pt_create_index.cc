@@ -9,6 +9,7 @@
 #include "yb/client/client.h"
 #include "yb/client/table.h"
 
+#include "yb/yql/cql/ql/ptree/pt_expr.h"
 #include "yb/yql/cql/ql/ptree/sem_context.h"
 #include "yb/gutil/strings/ascii_ctype.h"
 
@@ -34,14 +35,23 @@ PTCreateIndex::PTCreateIndex(MemoryContext *memctx,
                              const PTListNode::SharedPtr& columns,
                              const bool create_if_not_exists,
                              const PTTablePropertyListNode::SharedPtr& ordering_list,
-                             const PTListNode::SharedPtr& covering)
+                             const PTListNode::SharedPtr& covering,
+                             PTExpr::SharedPtr where_clause)
     : PTCreateTable(memctx, loc, table_name, columns, create_if_not_exists, ordering_list),
       is_unique_(is_unique),
       name_(name),
       covering_(covering),
       is_local_(false),
       column_descs_(memctx),
-      auto_includes_(memctx) {
+      auto_includes_(memctx),
+      where_clause_(where_clause),
+      func_ops_(memctx),
+      key_where_ops_(memctx),
+      where_ops_(memctx),
+      subscripted_col_where_ops_(memctx),
+      json_col_where_ops_(memctx),
+      partition_key_ops_(memctx),
+      filtering_exprs_(memctx) {
 }
 
 PTCreateIndex::~PTCreateIndex() {
@@ -186,6 +196,24 @@ CHECKED_STATUS PTCreateIndex::Analyze(SemContext *sem_context) {
     LOG(WARNING) << "Creating local secondary index " << yb_table_name().ToString()
                  << " as global index.";
     is_local_ = false;
+  }
+
+  // Analyze where clause for partial index. TODO - this is copied from
+  // where clause analysis in pt_dml.cc. Modify it for partial indexes as required.
+  // Construct the state variables and analyze the expression.
+  if (where_clause_.get()) {
+    MCVector<ColumnOpCounter> op_counters(sem_context->PTempMem());
+    op_counters.resize(indexed_table()->schema().num_columns());
+    ColumnOpCounter partition_key_counter;
+
+    WhereExprState where_state(&where_ops_, &key_where_ops_, &subscripted_col_where_ops_,
+                              &json_col_where_ops_, &partition_key_ops_, &op_counters,
+                              &partition_key_counter, opcode(), &func_ops_,
+                              &filtering_exprs_);
+
+    SemState sem_state(sem_context, QLType::Create(BOOL), InternalType::kBoolValue);
+    sem_state.SetWhereState(&where_state);
+    RETURN_NOT_OK(where_clause_->Analyze(sem_context));
   }
 
   // Restore the context value as we are done with this table.

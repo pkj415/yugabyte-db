@@ -15,6 +15,7 @@
 //--------------------------------------------------------------------------------------------------
 
 #include "yb/common/index.h"
+#include <glog/logging.h>
 #include "yb/common/common.pb.h"
 
 using std::vector;
@@ -77,7 +78,9 @@ IndexInfo::IndexInfo(const IndexInfoPB& pb)
       indexed_range_column_ids_(ColumnIdsFromPB(pb.indexed_range_column_ids())),
       index_permissions_(pb.index_permissions()),
       backfill_error_message_(pb.backfill_error_message()),
-      use_mangled_column_name_(pb.use_mangled_column_name()) {
+      use_mangled_column_name_(pb.use_mangled_column_name()),
+      where_clause_(pb.where_clause()),
+      has_where_clause_(pb.has_where_clause()) {
   for (const IndexInfo::IndexColumn &index_col : columns_) {
     // Mark column as covered if the index column is the column itself.
     // Do not mark a column as covered when indexing by an expression of that column.
@@ -131,13 +134,78 @@ vector<ColumnId> IndexInfo::index_key_column_ids() const {
   return ids;
 }
 
+bool IndexInfo::ExprHasNonPkColumns(const QLExpressionPB& expr_pb,
+    const Schema& indexed_schema) const {
+
+  if (expr_pb.has_value()) {
+    return false;
+  } else if (expr_pb.has_column_id()) {
+    return !indexed_schema.is_key_column(ColumnId(expr_pb.column_id()));
+  } else if (expr_pb.has_subscripted_col()) {
+    if (!indexed_schema.is_key_column(expr_pb.subscripted_col().column_id())) {
+      return true;
+    }
+    for (auto op: expr_pb.subscripted_col().subscript_args()) {
+      if (ExprHasNonPkColumns(op, indexed_schema))
+        return true;
+    }
+    return false;
+  } else if (expr_pb.has_bind_id()) {
+    // TODO - confirm this.
+    return false;
+  } else if (expr_pb.has_condition()) {
+    for (auto op: expr_pb.condition().operands()) {
+      if (ExprHasNonPkColumns(op, indexed_schema))
+        return true;
+    }
+    return false;
+  } else if (expr_pb.has_bfcall()) {
+    for (auto op: expr_pb.bfcall().operands()) {
+      if (ExprHasNonPkColumns(op, indexed_schema))
+        return true;
+    }
+    return false;
+  } else if (expr_pb.has_tscall()) {
+    for (auto op: expr_pb.tscall().operands()) {
+      if (ExprHasNonPkColumns(op, indexed_schema))
+        return true;
+    }
+    return false;
+  } else if (expr_pb.has_bocall()) {
+    for (auto op: expr_pb.bocall().operands()) {
+      if (ExprHasNonPkColumns(op, indexed_schema))
+        return true;
+    }
+    return false;
+  } else if (expr_pb.has_json_column()) {
+    if (!indexed_schema.is_key_column(expr_pb.json_column().column_id())) {
+      return true;
+    }
+    for (auto op: expr_pb.json_column().json_operations()) {
+      if (ExprHasNonPkColumns(op.operand(), indexed_schema))
+        return true;
+    }
+    return false;
+  }
+  DCHECK(false); // Should reach here.
+}
+
 bool IndexInfo::PrimaryKeyColumnsOnly(const Schema& indexed_schema) const {
   for (size_t i = 0; i < hash_column_count_ + range_column_count_; i++) {
     if (!indexed_schema.is_key_column(columns_[i].indexed_column_id)) {
       return false;
     }
   }
-  return true;
+
+  if (!has_where_clause_) {
+    LOG(INFO) << "Piyush - not calling ExprHasNonPkColumns since no where clause in index " << this->table_id();
+    return true;
+  }
+  else {
+    bool has_non_pk_cols = !ExprHasNonPkColumns(where_clause_, indexed_schema);
+    LOG(INFO) << "Piyush - ExprHasNonPkColumns returned " << !has_non_pk_cols << " for index " << this->table_id();
+    return has_non_pk_cols;
+  }
 }
 
 bool IndexInfo::IsColumnCovered(const ColumnId column_id) const {

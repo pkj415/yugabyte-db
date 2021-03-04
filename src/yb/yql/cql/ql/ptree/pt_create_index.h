@@ -10,6 +10,7 @@
 #include "yb/client/client.h"
 #include "yb/yql/cql/ql/ptree/pt_create_table.h"
 #include "yb/yql/cql/ql/ptree/pt_column_definition.h"
+#include "yb/yql/cql/ql/ptree/pt_expr.h"
 
 namespace yb {
 namespace ql {
@@ -34,7 +35,8 @@ class PTCreateIndex : public PTCreateTable {
                 const PTListNode::SharedPtr& columns,
                 bool create_if_not_exists,
                 const PTTablePropertyListNode::SharedPtr& ordering_list,
-                const PTListNode::SharedPtr& covering);
+                const PTListNode::SharedPtr& covering,
+                PTExpr::SharedPtr where_clause);
   virtual ~PTCreateIndex();
 
   // Node type.
@@ -83,6 +85,10 @@ class PTCreateIndex : public PTCreateTable {
     return column_descs_;
   }
 
+  const PTExpr::SharedPtr where_clause() const {
+    return where_clause_;
+  }
+
   CHECKED_STATUS AppendIndexColumn(SemContext *sem_context, PTColumnDefinition *column);
 
   virtual CHECKED_STATUS ToTableProperties(TableProperties *table_properties) const override;
@@ -107,6 +113,21 @@ class PTCreateIndex : public PTCreateTable {
   // Auto-include columns are primary-key columns in the data-table being indexed that are not yet
   // declared as part of the INDEX.
   MCList<PTIndexColumn::SharedPtr> auto_includes_;
+
+  // Where clause exists if this is a partial index
+  PTExpr::SharedPtr where_clause_;
+
+  MCList<FuncOp> func_ops_;
+  MCVector<ColumnOp> key_where_ops_;
+  MCList<ColumnOp> where_ops_;
+  MCList<SubscriptedColumnOp> subscripted_col_where_ops_;
+  MCList<JsonColumnOp> json_col_where_ops_;
+
+  // restrictions involving all hash/partition columns -- i.e. read requests using Token builtin
+  MCList<PartitionKeyOp> partition_key_ops_;
+
+  // Collecting all expressions that a chosen index must cover to process the statement.
+  MCVector<const PTExpr*> filtering_exprs_;
 };
 
 }  // namespace ql

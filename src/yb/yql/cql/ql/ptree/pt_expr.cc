@@ -64,6 +64,10 @@ CHECKED_STATUS PTExpr::CheckOperator(SemContext *sem_context) {
     switch (ql_op_) {
       case QL_OP_AND:
       case QL_OP_EQUAL:
+        if (sem_context->current_create_index_stmt()) {
+          // We will only support AND and = operator in CREATE INDEX predicate for now.
+          break;
+        }
       case QL_OP_LESS_THAN:
       case QL_OP_LESS_THAN_EQUAL:
       case QL_OP_GREATER_THAN:
@@ -71,7 +75,9 @@ CHECKED_STATUS PTExpr::CheckOperator(SemContext *sem_context) {
       case QL_OP_IN:
       case QL_OP_NOT_IN:
       case QL_OP_NOOP:
-        break;
+        if (!sem_context->current_create_index_stmt()) {
+          break;
+        }
       default:
         return sem_context->Error(this, "This operator is not allowed in where clause",
                                   ErrorCode::CQL_STATEMENT_INVALID);
@@ -746,6 +752,15 @@ CHECKED_STATUS PTRelationExpr::AnalyzeOperator(SemContext *sem_context,
       RETURN_NOT_OK(op1->CheckLhsExpr(sem_context));
       RETURN_NOT_OK(op2->CheckRhsExpr(sem_context));
       RETURN_NOT_OK(CheckEqualityOperands(sem_context, op1, op2));
+      if (sem_context->current_create_index_stmt() && (sem_context->where_state() != nullptr)) {
+        // For a where clause in partial index, we support only = NULL on columns.
+        if (!((expr_op() == ExprOperator::kRef)
+               && QLType::IsNull(op2->ql_type_id())) {
+          return sem_context->Error(this,
+            "Partial index where clauses support only = NULL operator on columns",
+            ErrorCode::INCOMPARABLE_DATATYPES);
+        }
+      }
       internal_type_ = yb::InternalType::kBoolValue;
       break;
     case QL_OP_LESS_THAN: FALLTHROUGH_INTENDED;

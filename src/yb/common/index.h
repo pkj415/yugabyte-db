@@ -127,6 +127,17 @@ class IndexInfo {
   // Check if this index is dependent on the given column.
   bool CheckColumnDependency(ColumnId column_id) const;
 
+  bool ExprHasNonPkColumns(const QLExpressionPB& expr_pb,
+    const Schema& indexed_schema) const;
+
+  const QLExpressionPB where_clause() const {
+    return where_clause_;
+  }
+
+  const bool has_where_clause() const {
+    return has_where_clause_;
+  }
+
  private:
   const TableId table_id_;            // Index table id.
   const TableId indexed_table_id_;    // Indexed table id.
@@ -147,6 +158,9 @@ class IndexInfo {
   // Newer INDEX use mangled column name instead of ID.
   bool use_mangled_column_name_ = false;
   bool has_index_by_expr_ = false;
+
+  const QLExpressionPB where_clause_;
+  bool has_where_clause_;
 };
 
 // A map to look up an index by its index table id.

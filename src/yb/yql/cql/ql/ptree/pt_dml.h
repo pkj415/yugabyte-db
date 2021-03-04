@@ -114,6 +114,7 @@ class ColumnOpCounter {
   int partial_col_in_count_ = 0;
 };
 
+// TODO - move this outside this file since even CREATE INDEX uses it, not just DMLs.
 // State variables for where clause.
 class WhereExprState {
  public:
