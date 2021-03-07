@@ -122,4 +122,43 @@ bool RequireRead(const QLWriteRequestPB& request, const Schema& schema) {
   return RequireReadForExpressions(request) || has_user_timestamp || is_range_operation;
 }
 
+void GetColumnIdsFromExpr(const QLExpressionPB& expr_pb, std::unordered_set<ColumnId>& column_ids) {
+
+  if (expr_pb.has_value()) {
+    return;
+  } else if (expr_pb.has_column_id()) {
+    column_ids.insert(ColumnId(expr_pb.column_id()));
+    return;
+  } else if (expr_pb.has_subscripted_col()) {
+    column_ids.insert(ColumnId(expr_pb.subscripted_col().column_id()));
+    for (auto op: expr_pb.subscripted_col().subscript_args()) {
+      GetColumnIdsFromExpr(op, column_ids);
+    }
+    return;
+  } else if (expr_pb.has_condition()) {
+    for (auto op: expr_pb.condition().operands())
+      GetColumnIdsFromExpr(op, column_ids);
+    return;
+  } else if (expr_pb.has_bfcall()) {
+    for (auto op: expr_pb.bfcall().operands())
+      GetColumnIdsFromExpr(op, column_ids);
+    return;
+  } else if (expr_pb.has_tscall()) {
+    for (auto op: expr_pb.tscall().operands())
+      GetColumnIdsFromExpr(op, column_ids);
+    return;
+  } else if (expr_pb.has_bocall()) {
+    for (auto op: expr_pb.bocall().operands())
+      GetColumnIdsFromExpr(op, column_ids);
+    return;
+  } else if (expr_pb.has_json_column()) {
+    column_ids.insert(
+      ColumnId(expr_pb.json_column().column_id()));
+    for (auto op: expr_pb.json_column().json_operations())
+      GetColumnIdsFromExpr(op.operand(), column_ids);
+    return;
+  }
+  DCHECK(false); // Should not reach here. If some case is not handled, handle it.
+}
+
 } // namespace yb

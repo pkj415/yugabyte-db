@@ -19,6 +19,7 @@
 
 #include "yb/client/table.h"
 
+#include "yb/common/schema.h"
 #include "yb/yql/cql/ql/ptree/sem_context.h"
 
 DECLARE_bool(use_cassandra_authentication);
@@ -368,11 +369,23 @@ Status PTDmlStmt::AnalyzeIndexesForWrites(SemContext *sem_context) {
   for (const auto& itr : table_->index_map()) {
     const TableId& index_id = itr.first;
     const IndexInfo& index = itr.second;
-    // If the index indexes the primary key columns only, index updates can be issued from the CQL
-    // proxy side without reading the current row so long as the DML does not delete the column
-    // (including setting the value to null). Otherwise, the updates needed can only be determined
-    // from the tserver side after the current values are read.
-    if (index.PrimaryKeyColumnsOnly(indexed_schema)) {
+
+    bool primary_key_cols_only = index.PrimaryKeyColumnsOnly(indexed_schema);
+    std::unordered_set<ColumnId> pred_col_ids;
+    index.GetPredicateColumnIds(pred_col_ids);
+
+    // If the index indexes the primary key columns only and doesn't reference non-pk columns in
+    // predicate, index updates can be issued from the CQL proxy side without reading the current
+    // row so long as the DML does not delete the column (including setting the value to null).
+    // Otherwise, the updates needed can only be determined from the tserver side after the current
+    // values are read.
+
+    // TODO (Piyush) - Right now we are not distinguishing between -
+    //   1. primary columns only in index where clause (if it is present) and
+    //   2. non-primary columns in index where clause.
+    // This distinction can help in optimizing the index write path as per discussion
+    // in the Partial Indexes design doc.
+    if (primary_key_cols_only && pred_col_ids.empty()) {
       std::shared_ptr<client::YBTable> index_table = sem_context->GetTableDesc(index_id);
       if (index_table == nullptr) {
         return sem_context->Error(this, Substitute("Index table $0 not found", index_id).c_str(),
@@ -385,6 +398,15 @@ Status PTDmlStmt::AnalyzeIndexesForWrites(SemContext *sem_context) {
         const ColumnId indexed_column_id = column.indexed_column_id;
         if (!indexed_schema.is_key_column(indexed_column_id)) {
           column_refs_.insert(indexed_column_id);
+        }
+      }
+
+      // In case non-pk columns are present in the index predicate (valid only for a partial index),
+      // add those references as well.
+      LOG(INFO) << "Piyush - Columns in predicate of index " << index.table_id();
+      for (const ColumnId& col_id : pred_col_ids) {
+        if (!indexed_schema.is_key_column(col_id)) {
+          column_refs_.insert(col_id);
         }
       }
     }
@@ -543,17 +565,15 @@ Status WhereExprState::AnalyzeColumnOp(SemContext *sem_context,
       }
 
       // Check for illogical conditions.
-      if (col_args == nullptr) { // subcolumn conditions don't affect the condition counter.
-        if (expr->ql_op() == QL_OP_LESS_THAN || expr->ql_op() == QL_OP_LESS_THAN_EQUAL) {
-          counter.increase_lt(col_args != nullptr);
-        } else {
-          counter.increase_gt(col_args != nullptr);
-        }
+      if (expr->ql_op() == QL_OP_LESS_THAN || expr->ql_op() == QL_OP_LESS_THAN_EQUAL) {
+        counter.increase_lt(col_args != nullptr);
+      } else {
+        counter.increase_gt(col_args != nullptr);
+      }
 
-        if (!counter.isValid()) {
-          return sem_context->Error(expr, "Illogical condition for where clause",
-              ErrorCode::CQL_STATEMENT_INVALID);
-        }
+      if (!counter.isValid()) {
+        return sem_context->Error(expr, "Illogical condition for where clause",
+            ErrorCode::CQL_STATEMENT_INVALID);
       }
 
       // Check that the column is being used correctly.

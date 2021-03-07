@@ -16,6 +16,7 @@
 
 #include "yb/common/index.h"
 #include "yb/common/common.pb.h"
+#include "yb/common/ql_protocol_util.h"
 
 using std::vector;
 using std::unordered_map;
@@ -77,7 +78,9 @@ IndexInfo::IndexInfo(const IndexInfoPB& pb)
       indexed_range_column_ids_(ColumnIdsFromPB(pb.indexed_range_column_ids())),
       index_permissions_(pb.index_permissions()),
       backfill_error_message_(pb.backfill_error_message()),
-      use_mangled_column_name_(pb.use_mangled_column_name()) {
+      use_mangled_column_name_(pb.use_mangled_column_name()),
+      predicate_(pb.where_clause()),
+      has_predicate_(pb.has_where_clause()) {
   for (const IndexInfo::IndexColumn &index_col : columns_) {
     // Mark column as covered if the index column is the column itself.
     // Do not mark a column as covered when indexing by an expression of that column.
@@ -137,7 +140,14 @@ bool IndexInfo::PrimaryKeyColumnsOnly(const Schema& indexed_schema) const {
       return false;
     }
   }
+
   return true;
+}
+
+void IndexInfo::GetPredicateColumnIds(std::unordered_set<ColumnId>& pred_column_ids) const {
+  if (has_predicate_) {
+    GetColumnIdsFromExpr(predicate_, pred_column_ids);
+  }
 }
 
 bool IndexInfo::IsColumnCovered(const ColumnId column_id) const {

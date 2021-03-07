@@ -69,11 +69,18 @@ class IndexInfo {
   }
   const IndexPermissions index_permissions() const { return index_permissions_; }
 
+  const QLExpressionPB predicate() const { return predicate_; }
+
+  const bool has_predicate() const { return has_predicate_; }
+
   // Return column ids that are primary key columns of the indexed table.
   std::vector<ColumnId> index_key_column_ids() const;
 
   // Index primary key columns of the indexed table only?
   bool PrimaryKeyColumnsOnly(const Schema& indexed_schema) const;
+
+  // Get column ids of indexed table used in predicate (valid only for partial index).
+  void GetPredicateColumnIds(std::unordered_set<ColumnId>& pred_column_ids) const;
 
   // Is column covered by this index? (Note: indexed columns are always covered)
   bool IsColumnCovered(ColumnId column_id) const;
@@ -147,6 +154,9 @@ class IndexInfo {
   // Newer INDEX use mangled column name instead of ID.
   bool use_mangled_column_name_ = false;
   bool has_index_by_expr_ = false;
+
+  const QLExpressionPB predicate_;
+  bool has_predicate_;
 };
 
 // A map to look up an index by its index table id.

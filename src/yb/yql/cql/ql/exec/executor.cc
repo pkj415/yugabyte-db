@@ -466,6 +466,11 @@ Status Executor::ExecPTNode(const PTCreateTable *tnode) {
         index_info->add_indexed_range_column_ids(col_desc.id());
       }
     }
+    if (index_node->where_clause()) {
+      // TODO (Piyush): Add a ToString method for PTExpr.
+      LOG(INFO) << "Piyush - where clause present in index";
+      RETURN_NOT_OK(PTExprToPB(index_node->where_clause(), index_info->mutable_where_clause()));
+    }
   }
 
   for (const auto& column : tnode->hash_columns()) {
@@ -2135,6 +2140,7 @@ Status Executor::AddIndexWriteOps(const PTDmlStmt *tnode,
       } else if (i < index->key_column_count()) {
         *index_req->add_range_column_values() = values.at(indexed_column_id);
       } else if (is_upsert) {
+        // TODO(Piyush): Will we ever reach here for pk-only indexes?
         const auto itr = values.find(indexed_column_id);
         if (itr != values.end()) {
           QLColumnValuePB* column_value = index_req->add_column_values();

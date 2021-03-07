@@ -95,6 +95,9 @@ bool RequireRead(const QLWriteRequestPB& request, const Schema& schema);
 // Does this write request perform a range operation (e.g. range delete)?
 bool IsRangeOperation(const QLWriteRequestPB& request, const Schema& schema);
 
+// Populate a set of column ids that are used in an expression.
+void GetColumnIdsFromExpr(const QLExpressionPB& expr_pb, std::unordered_set<ColumnId>& column_ids);
+
 } // namespace yb
 
 #endif // YB_COMMON_QL_PROTOCOL_UTIL_H

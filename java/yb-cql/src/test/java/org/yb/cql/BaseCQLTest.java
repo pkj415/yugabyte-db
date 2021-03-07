@@ -706,4 +706,29 @@ public class BaseCQLTest extends BaseMiniClusterTest {
     return totalSum;
   }
 
+  // private boolean doesQueryPlanContainsSubstring(String query, String substring)
+  //     throws SQLException {
+  //   try (ResultSet rs = session.execute("EXPLAIN " + query)) {
+  //     assert (rs.getMetaData().getColumnCount() == 1); // Expecting one string column.
+  //     while (rs.next()) {
+  //       if (rs.getString(1).contains(substring)) {
+  //         return true;
+  //       }
+  //     }
+  //     return false;
+  //   }
+  // }
+
+  // /** Whether or not this select query uses Index Scan with a given index. */
+  // protected boolean isIndexScan(String query, String index)
+  //     throws SQLException {
+  //   return doesQueryPlanContainsSubstring(stmt, query, "Index Scan using " + index);
+  // }
+
+  // /**
+  //  * Whether or not this  query requires filtering
+  //  */
+  // protected boolean doesNeedFiltering(String query) throws SQLException {
+  //   return doesQueryPlanContainsSubstring(query, "Filter:");
+  // }
 }

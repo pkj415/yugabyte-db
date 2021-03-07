@@ -213,6 +213,11 @@ class SemContext : public ProcessContext {
     return sem_state_->if_state();
   }
 
+  IdxPredicateState *idx_predicate_state() const {
+    DCHECK(sem_state_) << "State variable is not set for the expression";
+    return sem_state_->idx_predicate_state();
+  }
+
   bool selecting_from_index() const {
     DCHECK(sem_state_) << "State variable is not set";
     return sem_state_->selecting_from_index();

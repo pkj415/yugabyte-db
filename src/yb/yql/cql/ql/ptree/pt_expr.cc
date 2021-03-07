@@ -17,6 +17,8 @@
 
 #include "yb/client/table.h"
 
+#include "yb/common/common.pb.h"
+#include "yb/gutil/macros.h"
 #include "yb/yql/cql/ql/ptree/pt_expr.h"
 #include "yb/yql/cql/ql/ptree/pt_bcall.h"
 #include "yb/yql/cql/ql/ptree/sem_context.h"
@@ -74,6 +76,22 @@ CHECKED_STATUS PTExpr::CheckOperator(SemContext *sem_context) {
         break;
       default:
         return sem_context->Error(this, "This operator is not allowed in where clause",
+                                  ErrorCode::CQL_STATEMENT_INVALID);
+    }
+  }
+
+  // Partial index where clause only supports these operators: =, AND, and !=.
+  if (sem_context->idx_predicate_state() != nullptr) {
+    switch (ql_op_) {
+      case QL_OP_AND:
+      case QL_OP_EQUAL:
+      case QL_OP_NOT_EQUAL:
+      case QL_OP_GREATER_THAN:
+      case QL_OP_NOOP:
+        break;
+      default:
+        return sem_context->Error(this,
+                                  "This operator is not allowed in partial index where clause",
                                   ErrorCode::CQL_STATEMENT_INVALID);
     }
   }
@@ -832,6 +850,30 @@ CHECKED_STATUS PTRelationExpr::AnalyzeOperator(SemContext *sem_context,
                                   ErrorCode::CQL_STATEMENT_INVALID);
       }
     }
+  }
+
+  if (sem_context->idx_predicate_state() != nullptr) {
+    DCHECK(op1->index_desc() != nullptr ||
+           op1->expr_op() == ExprOperator::kRef ||
+           op1->expr_op() == ExprOperator::kSubColRef ||
+           op1->expr_op() == ExprOperator::kJsonOperatorRef ||
+           op1->expr_op() == ExprOperator::kBcall);
+    // TODO(Piyush): Block mutable functions.
+    // TODO(Piyush): For operators:
+    //    1. Implement eq/ineq counter check, maybe re-use Neil's code once his
+    //       split is done. Mostly try to re-use so that select stmnt where clause checks
+    //       act as a safety net for everything in create index. Add more checks before
+    //       to restrict partial indexes.
+    // if (op1->expr_op() != ExprOperator::kRef) {
+    //   return sem_context->Error(this,
+    //     "Parital index where clause only allows operators on table columns",
+    //     ErrorCode::FEATURE_NOT_SUPPORTED);
+    // }
+    // if (!QLType::IsNull(op2->ql_type_id())) {
+    //   return sem_context->Error(this,
+    //     "Parital index where clause only allows = NULL operator",
+    //     ErrorCode::FEATURE_NOT_SUPPORTED);
+    // }
   }
 
   return Status::OK();

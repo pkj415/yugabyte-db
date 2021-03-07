@@ -1128,6 +1128,17 @@ Status QLWriteOperation::UpdateIndexes(const QLTableRow& existing_row, const QLT
     const IndexInfo* index = VERIFY_RESULT(index_map_.FindIndex(index_id));
     bool index_key_changed = false;
     if (IsRowDeleted(existing_row, new_row)) {
+      if (index->has_predicate()) {
+        // If it is a partial index and predicate wasn't satisfied for the existing row
+        // which is being deleted, we need to do nothing.
+        bool is_pred_statisfied;
+        // TODO(Piyush): Ensure EvalCondition returns an error if some column is missing.
+        RETURN_NOT_OK(this->EvalCondition(index->predicate().condition(), existing_row,
+          &is_pred_statisfied));
+        LOG(INFO) << "Piyush IsRowDeleted() predicate is " << is_pred_statisfied;
+        if (!is_pred_statisfied)
+          continue;
+      }
       index_key_changed = true;
     } else {
       VERIFY_RESULT(CreateAndSetupIndexInsertRequest(
@@ -1197,6 +1208,9 @@ Result<QLWriteRequestPB*> CreateAndSetupIndexInsertRequest(
             index_key_changed = true;
           }
         } else {
+          // TODO(Piyush): This else is possibly dead code. It can never happen that the new_row
+          // doesn't have some column but the existing one does because we copy the existing one
+          // into the new one before this function call.
           result = existing_row.GetValue(index_column.indexed_column_id);
         }
       }
@@ -1223,6 +1237,7 @@ Result<QLWriteRequestPB*> CreateAndSetupIndexInsertRequest(
             index_key_changed = true;
           }
         } else {
+          // TODO(Piyush): This else is possibly dead code.
           RETURN_NOT_OK(expr_executor->EvalExpr(
               index_column.colexpr, existing_row, result.Writer()));
         }
@@ -1246,6 +1261,7 @@ Result<QLWriteRequestPB*> CreateAndSetupIndexInsertRequest(
     // current value.
     if (index_key_changed) {
       if (!result) {
+        // TODO(Piyush): This if is possibly dead code.
         result = existing_row.GetValue(index_column.indexed_column_id);
       }
     } else if (!FLAGS_ycql_disable_index_updating_optimization &&
@@ -1263,6 +1279,17 @@ Result<QLWriteRequestPB*> CreateAndSetupIndexInsertRequest(
 
   if (has_index_key_changed) {
     *has_index_key_changed = index_key_changed;
+  }
+
+  // If this is a partial index and the index predicate is false for the new row, skip the insert.
+  // TODO(Piyush): Ensure EvalCondition returns an error if some column is missing.
+  if (index->has_predicate()) {
+    bool is_pred_statisfied;
+    RETURN_NOT_OK(expr_executor->EvalCondition(
+      index->predicate().condition(), new_row, &is_pred_statisfied));
+    LOG(INFO) << "Piyush CreateAndSetupIndexInsertRequest() predicate is " << is_pred_statisfied;
+    if (!is_pred_statisfied)
+      return nullptr;
   }
 
   if (index_has_write_permission &&

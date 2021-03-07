@@ -30,6 +30,7 @@ namespace ql {
 
 class WhereExprState;
 class IfExprState;
+class IdxPredicateState;
 class PTColumnDefinition;
 
 //--------------------------------------------------------------------------------------------------
@@ -89,6 +90,12 @@ class SemState {
                     InternalType internal_type,
                     const MCSharedPtr<MCString>& bindvar_name = nullptr,
                     const ColumnDesc *lhs_col = nullptr);
+
+  // Update state variable for index predicate clause i.e, where clause.
+  void SetIdxPredicateState(IdxPredicateState *idx_predicate_state) {
+    idx_predicate_state_ = idx_predicate_state;
+  }
+  IdxPredicateState *idx_predicate_state() const { return idx_predicate_state_; }
 
   // Set the current state using previous state's values.
   void CopyPreviousStates();
@@ -167,6 +174,9 @@ class SemState {
 
   // State variables for if expression.
   IfExprState *if_state_ = nullptr;
+
+  // State variables for index predicate expression i.e., where clause in case of partial indexes.
+  IdxPredicateState *idx_predicate_state_ = nullptr;
 
   // Predicate for selecting data from an index instead of a user table.
   bool selecting_from_index_ = false;

@@ -347,19 +347,19 @@ public class TestIndex extends BaseCQLTest {
     assertEquals(columns, actual);
   }
 
-  private void createTable(String statement, boolean strongConsistency) throws Exception {
+  protected void createTable(String statement, boolean strongConsistency) throws Exception {
     session.execute(
         statement + (strongConsistency ? " with transactions = {'enabled' : true};" : ";"));
   }
 
-  private void createIndex(String statement, boolean strongConsistency) throws Exception {
+  protected void createIndex(String statement, boolean strongConsistency) throws Exception {
     session.execute(
         statement + (strongConsistency ? ";" :
                      " with transactions = {'enabled' : false, " +
                      "'consistency_level' : 'user_enforced'};"));
   }
 
-  private Set<String> queryTable(String table, String columns) {
+  protected Set<String> queryTable(String table, String columns) {
     Set<String> rows = new HashSet<String>();
     for (Row row : session.execute(String.format("select %s from %s;", columns, table))) {
       rows.add(row.toString());
