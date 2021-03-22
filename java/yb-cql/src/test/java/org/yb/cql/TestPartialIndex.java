@@ -34,17 +34,20 @@ class Write {
   public List<List<String>> differing_cols;
   public List<String> row;
   public boolean should_fail;
+  public boolean use_insert_stmt; // Use UPDATE if false.
 
   public Write(boolean predicate,
         int ref_write_index,
         List<String> matching_cols,
         List<List<String>> differing_cols,
-        boolean should_fail) throws Exception {
+        boolean should_fail,
+        boolean use_insert_stmt) throws Exception {
     this.predicate = predicate;
     this.ref_write_index = ref_write_index;
     this.matching_cols = matching_cols;
     this.differing_cols = differing_cols;
     this.should_fail = should_fail;
+    this.use_insert_stmt = use_insert_stmt;
   }
 
   public void setRow(List<String> row) {
@@ -299,52 +302,15 @@ public class TestPartialIndex extends TestIndex {
   }
 
   /*
-   * Helper function to test scenarios of two writes performed in sequence. The writes can be
+   * Helper function to test scenarios of writes performed in sequence. The writes can be
    * done either via INSERT or UPDATE.
    *
    * @param cols_in_index names of column in index table.
-   * @param first_row_pred whether first written row should satisfy index predicate.
-   * @param second_row_pred whether second written row should satisfy index predicate.
-   * @param match_cols, differ_cols_list similar to description in match_rows.
+   * @param writes list of Write objects. Each Write object has info on the type
+   *        of row to be used - its predicate value, cols tha have to match
+   *        with a reference row, groups of cols that have to differ with the
+   *        ref row, if it should fail, and whether to use INSERT/UPDATE.
    */
-  void testBackToBackWrite(List<String> cols_in_index, boolean first_row_pred,
-                           boolean second_row_pred, List<String> match_cols,
-                           List<List<String>> differ_cols_list) {
-    List<String> first_row = first_row_pred ? getUnusedPredTrueRow() : getUnusedPredFalseRow();
-    session.execute(
-      String.format("INSERT INTO %s(%s) VALUES (%s)",
-        test_table_name,
-        String.join(",", col_names),
-        String.join(",", first_row)));
-
-    assertIndex(cols_in_index);
-
-    String new_row;
-    if (second_row_pred) {
-      new_row = String.join(", ", getUnusedPredTrueRow(
-        first_row,
-        match_cols,
-        differ_cols_list));
-    } else {
-      new_row = String.join(", ", getUnusedPredFalseRow(
-        first_row,
-        match_cols,
-        differ_cols_list));
-    }
-
-    session.execute(
-      String.format("INSERT INTO %s(%s) VALUES (%s)",
-        test_table_name,
-        String.join(",", col_names),
-        new_row)
-    );
-
-    assertIndex(cols_in_index);
-
-    // Drop the index, truncate the table.
-    resetTableAndIndex();
-  }
-
   void performWrites(List<String> cols_in_index, List<Write> writes) {
     for (int i=0; i<writes.size(); i++) {
       Write write = writes.get(i);
@@ -383,6 +349,37 @@ public class TestPartialIndex extends TestIndex {
 
     // Drop the index, truncate the table.
     resetTableAndIndex();
+
+
+    // TODO(Piyush): Integrate code to use UPDATE statement
+    // List<String> row = getUnusedPredTrueRow();
+    // List<String> where_clause_elems = new ArrayList<String>();
+    // for (int i=0; i<this.pk_col_cnt; i++) {
+    //   where_clause_elems.add(col_names.get(i) + "=" + row.get(i));
+    // }
+
+    // String set_clause = "";
+    // for (int i=this.pk_col_cnt; i<this.col_cnt; i++) {
+    //   set_clause += col_names.get(i) + "=" + row.get(i);
+    // }
+
+    // session.execute(
+    //   String.format("UPDATE %s SET %s WHERE %s",
+    //     test_table_name,
+    //     set_clause,
+    //     String.join(" and ", where_clause_elems)));
+
+    // // If all non-pk non-static cols were NULL, then the UPDATE actually
+    // // wouldn't result in an insert. In that case un mark the use true pred row.
+    // boolean all_null = true;
+    // for (int i=this.pk_col_cnt; i<this.col_cnt; i++) {
+    //   if (!row.get(i).equalsIgnoreCase("null")) {
+    //     all_null = false;
+    //     break;
+    //   }
+    // }
+    // if (all_null)
+    //   markPredTrueRowUnused(row);
   }
 
   /**
@@ -439,13 +436,15 @@ public class TestPartialIndex extends TestIndex {
         include_clause, predicate),
       strongConsistency);
 
-    // Insert (No existing row with same pk.)
+    // Insert (No existing row with same pk)
     // --------------------------------------
-    //       _______________________________________________
-    //      |   pred=true                 |   pred=false   | <- New row's pred
-    //      |-----------------------------|----------------|
-    //      |  Insert into Partial Index  |    No-op       |
-    //      ------------------------------------------------
+    //       ______________________________________________
+    //      |New row's pred|                               |
+    //      |--------------+-------------------------------|
+    //      |  pred=true   |   Insert into Partial Index   |
+    //      |--------------+-------------------------------|
+    //      |  pred=false  |    No-op                      |
+    //      +--------------+-------------------------------+
 
     // Case with pred=true.
     this.performWrites(cols_in_index,
@@ -455,19 +454,10 @@ public class TestPartialIndex extends TestIndex {
           -1, /* ref_write_index */
           new ArrayList<String>(), /* matching_cols */
           new ArrayList<List<String>>(), /* differing_cols_list */
-          false /* should_fail */)
+          false, /* should_fail */
+          true /* use_insert_stmt */)
       )
     );
-
-    // Older version of test case below.
-    // session.execute(
-    //   String.format("INSERT INTO %s(%s) VALUES (%s)",
-    //     test_table_name,
-    //     String.join(",", col_names),
-    //     String.join(",", getUnusedPredTrueRow())));
-
-    // assertIndex(cols_in_index);
-    // resetTableAndIndex();
 
     // Case with pred=false.
     this.performWrites(cols_in_index,
@@ -477,32 +467,21 @@ public class TestPartialIndex extends TestIndex {
           -1, /* ref_write_index */
           new ArrayList<String>(), /* matching_cols */
           new ArrayList<List<String>>(), /* differing_cols_list */
-          false /* should_fail */)
+          false, /* should_fail */
+          true /* use_insert_stmt */)
       )
     );
 
-    // Older version of test case below.
-    // session.execute(
-    //   String.format("INSERT INTO %s(%s) VALUES (%s)",
-    //   test_table_name,
-    //   String.join(",", col_names),
-    //   String.join(",", getUnusedPredFalseRow())));
-
-    // assertIndex(cols_in_index);
-    // resetTableAndIndex();
-
-    //  Insert - extra cases applicable only to unique partial indexes.
-    //
-    //        • True insert - UPI updated because predicate=true and no existing entry.
-    //        • True insert - UPI not updated because predicate=false.
-    //        • (Failure case) True insert - UPI not updated because predicate=true but another existing entry with predicate=true.
-    //                                                                 ____________________________________
-    //                                                                |   pred=true       |   pred=false   |
-    //     |----------------------------------------------------------|-------------------|----------------|
-    //     | Exists a row with same index col values and pred=true    |    FAIL OP        |     No-op      |
-    //     |----------------------------------------------------------|-------------------|----------------|
-    //     | Exists no row with same index col values and pred=true   |  Insert into UPI  |     No-op      |
-    //     -------------------------------------------------------------------------------------------------
+    // Insert - extra cases applicable only to unique partial indexes.
+    // ---------------------------------------------------------------
+    //      _______________________________________________________________________________________
+    //     |               |  Table has row with same indexed  |  Table has no row with same       |
+    //     |New row's pred |  col values and pred=true         |  indexed col values and pred=true |
+    //     |---------------|-----------------------------------|-----------------------------------|
+    //     | pred=true     |   FAIL OP                         |     Insert into UPI               |
+    //     |---------------+-----------------------------------+-----------------------------------|
+    //     | pred=false    |   No-op                           |     No-op                         |
+    //     ----------------------------------------------------+------------------------------------
 
     // pred=true, Exists a row with same index col values and pred=true
     if (is_unique && this.same_i_diff_pk_mulitple_pred_true_rows) {
@@ -513,42 +492,17 @@ public class TestPartialIndex extends TestIndex {
             -1, /* ref_write_index */
             new ArrayList<String>(), /* matching_cols */
             new ArrayList<List<String>>(), /* differing_cols_list */
-            false /* should_fail */),
+            false, /* should_fail */
+            true /* use_insert_stmt */),
           new Write(
             true, /* predicate */
             0, /* ref_write_index */
             indexed_cols, /* matching_cols */
             Arrays.asList(new ArrayList<String>(getPk(col_names))), /* differing_cols_list */
-            true /* should_fail */)
+            true, /* should_fail */
+            true /* use_insert_stmt */)
         )
       );
-
-      // Older version of test case below.
-      // List<String> existing_row = getUnusedPredTrueRow();
-      // session.execute(
-      //   String.format("INSERT INTO %s(%s) VALUES (%s)",
-      //     test_table_name,
-      //     String.join(",", col_names),
-      //     String.join(",", existing_row)));
-
-      // assertIndex(cols_in_index);
-
-      // List<List<String>> differ_cols_list = new ArrayList<List<String>>();
-      // differ_cols_list.add(getPk(col_names));
-      // String new_row = String.join(", ", getUnusedPredTrueRow(
-      //   existing_row,
-      //   indexed_cols,
-      //   differ_cols_list));
-
-      // runInvalidStmt(
-      //   String.format("INSERT INTO %s(%s) VALUES (%s)",
-      //     test_table_name,
-      //     String.join(",", col_names),
-      //     new_row)
-      // );
-
-      // // Drop the index, truncate the table.
-      // resetTableAndIndex();
     }
 
     // pred=false, Exists a row with same index col values and pred=true
@@ -560,40 +514,34 @@ public class TestPartialIndex extends TestIndex {
             -1, /* ref_write_index */
             new ArrayList<String>(), /* matching_cols */
             new ArrayList<List<String>>(), /* differing_cols_list */
-            false /* should_fail */),
+            false, /* should_fail */
+            true /* use_insert_stmt */),
           new Write(
             false, /* predicate */
             0, /* ref_write_index */
             indexed_cols, /* matching_cols */
             Arrays.asList(new ArrayList<String>(getPk(col_names))), /* differing_cols_list */
-            false /* should_fail */)
+            false, /* should_fail */
+            true /* use_insert_stmt */)
         )
       );
-
-      // Older version of test case below.
-      List<List<String>> differ_cols_list = new ArrayList<List<String>>();
-      differ_cols_list.add(getPk(col_names));
-      testBackToBackWrite(
-        cols_in_index,
-        true /* existing_pred */,
-        false /* new_pred */,
-        indexed_cols,
-        differ_cols_list);
     }
 
-    //  Upsert: There is an existing row with same pk.
+    // Update (There is an existing row with same pk)
+    // ----------------------------------------------
     //
-    //                                                ________________________________________________________________________________________________________________________________
-    //                                                | pred=true (Same I && C cols) | pred=true (Diff I || C cols) | pred=false (Same I && C cols)  | pred=false (Diff I || C cols) |
-    //     |------------------------------------------|------------------------------|------------------------------|--------------------------------|-------------------------------|
-    //     | Same pk row exists with pred=false       | Insert into PI               | Insert into PI               | No-op                          | No-op                         |
-    //     |------------------------------------------|------------------------------|------------------------------|--------------------------------|-------------------------------|
-    //     | Same pk row exists with pred=true        | No-op                        | Update PI                    | Delete from PI                 | Delete from PI                |
-    //     ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    //
-    //        • Upsert - PI updated: old entry removed, because predicate=true only for old entry.
-    //        • Upsert - PI updated: old entry removed, new entry added since predicate=true for both (only if change in indexed cols).
-    //        • Upsert - no update since for both old and new entry predicate=false.
+    //                                      _________________________________________________
+    //                                      | Table has same pk row | Table has same pk row |
+    //                                      | with pred=false       | with pred=true        |
+    //     |--------------------------------|-----------------------|-----------------------|
+    //     | pred=true (Same I && C cols)   | Insert into PI        | No-op                 |
+    //     |--------------------------------+-----------------------+-----------------------|
+    //     | pred=true (Diff I || C cols)   | Insert into PI        | Update PI             |
+    //     |--------------------------------+-----------------------+-----------------------|
+    //     | pred=false (Same I && C cols)  | No-op                 | Delete from PI        |
+    //     |--------------------------------+-----------------------+-----------------------|
+    //     | pred=false (Diff I || C cols)  | No-op                 | Delete from PI        |
+    //     |--------------------------------------------------------------------------------|
 
     // pred=true (Same I && C cols), Same pk row exists with pred=false.
     if (this.same_pk_i_c_both_pred_true_false_rows) {
@@ -607,24 +555,17 @@ public class TestPartialIndex extends TestIndex {
             -1, /* ref_write_index */
             new ArrayList<String>(), /* matching_cols */
             new ArrayList<List<String>>(), /* differing_cols_list */
-            false /* should_fail */),
+            false, /* should_fail */
+            true /* use_insert_stmt */),
           new Write(
             true, /* predicate */
             0, /* ref_write_index */
             matching_cols, /* matching_cols */
             new ArrayList<List<String>>(), /* differing_cols_list */
-            false /* should_fail */)
+            false, /* should_fail */
+            true /* use_insert_stmt */)
         )
       );
-
-      // Older version of test case below.
-      // testBackToBackWrite(
-      //   cols_in_index,
-      //   false /* existing_pred */,
-      //   true /* new_row_pred */,
-      //   matching_cols, /* new row should match on these cols */
-      //   new ArrayList<List<String>>() /* new row should differ on these cols */
-      // );
     }
 
     // pred=true (Diff I || C cols), Same pk row exists with pred=false.
@@ -643,26 +584,17 @@ public class TestPartialIndex extends TestIndex {
             -1, /* ref_write_index */
             new ArrayList<String>(), /* matching_cols */
             new ArrayList<List<String>>(), /* differing_cols_list */
-            false /* should_fail */),
+            false, /* should_fail */
+            true /* use_insert_stmt */),
           new Write(
             true, /* predicate */
             0, /* ref_write_index */
             matching_cols, /* matching_cols */
             Arrays.asList(new ArrayList<String>(indexed_cols)), /* differing_cols_list */
-            false /* should_fail */)
+            false, /* should_fail */
+            true /* use_insert_stmt */)
         )
       );
-
-      // Older version of test case below.
-      // List<List<String>> differ_cols_list = new ArrayList<List<String>>();
-      // differ_cols_list.add(new ArrayList<String>(indexed_cols));
-      // testBackToBackWrite(
-      //   cols_in_index,
-      //   false /* existing_pred */,
-      //   true /* new_row_pred */,
-      //   matching_cols, /* new row should match on these cols */
-      //   differ_cols_list /* new row should differ on these cols */
-      // );
     }
 
     // Case 2
@@ -677,26 +609,17 @@ public class TestPartialIndex extends TestIndex {
             -1, /* ref_write_index */
             new ArrayList<String>(), /* matching_cols */
             new ArrayList<List<String>>(), /* differing_cols_list */
-            false /* should_fail */),
+            false, /* should_fail */
+            true /* use_insert_stmt */),
           new Write(
             true, /* predicate */
             0, /* ref_write_index */
             matching_cols, /* matching_cols */
             Arrays.asList(new ArrayList<String>(covering_cols)), /* differing_cols_list */
-            false /* should_fail */)
+            false, /* should_fail */
+            true /* use_insert_stmt */)
         )
       );
-
-      // Older version of test case below.
-      // List<List<String>> differ_cols_list = new ArrayList<List<String>>();
-      // differ_cols_list.add(new ArrayList<String>(covering_cols));
-      // testBackToBackWrite(
-      //   cols_in_index,
-      //   false /* existing_pred */,
-      //   true /* new_row_pred */,
-      //   matching_cols, /* new row should match on these cols */
-      //   differ_cols_list /* new row should differ on these cols */
-      // );
     }
 
     // pred=false (Same I && C cols), Same pk row exists with pred=false.
@@ -713,24 +636,17 @@ public class TestPartialIndex extends TestIndex {
             -1, /* ref_write_index */
             new ArrayList<String>(), /* matching_cols */
             new ArrayList<List<String>>(), /* differing_cols_list */
-            false /* should_fail */),
+            false, /* should_fail */
+            true /* use_insert_stmt */),
           new Write(
             false, /* predicate */
             0, /* ref_write_index */
             matching_cols, /* matching_cols */
             new ArrayList<List<String>>(), /* differing_cols_list */
-            false /* should_fail */)
+            false, /* should_fail */
+            true /* use_insert_stmt */)
         )
       );
-
-      // Older version of test case below.
-      // testBackToBackWrite(
-      //   cols_in_index,
-      //   false /* existing_pred */,
-      //   false /* new_row_pred */,
-      //   matching_cols, /* new row should match on these cols */
-      //   new ArrayList<List<String>>() /* new row should differ on these cols */
-      // );
     }
 
     // pred=false (Diff I || C cols), Same pk row exists with pred=false.
@@ -749,27 +665,17 @@ public class TestPartialIndex extends TestIndex {
             -1, /* ref_write_index */
             new ArrayList<String>(), /* matching_cols */
             new ArrayList<List<String>>(), /* differing_cols_list */
-            false /* should_fail */),
+            false, /* should_fail */
+            true /* use_insert_stmt */),
           new Write(
             false, /* predicate */
             0, /* ref_write_index */
             matching_cols, /* matching_cols */
             Arrays.asList(new ArrayList<String>(indexed_cols)), /* differing_cols_list */
-            false /* should_fail */)
+            false, /* should_fail */
+            true /* use_insert_stmt */)
         )
       );
-
-      // Older version of test case below.
-      // List<List<String>> differ_cols_list = new ArrayList<List<String>>();
-      // differ_cols_list.add(new ArrayList<String>(indexed_cols));
-      
-      // testBackToBackWrite(
-      //   cols_in_index,
-      //   false /* existing_pred */,
-      //   false /* new_row_pred */,
-      //   matching_cols, /* new row should match on these cols */
-      //   differ_cols_list /* new row should differ on these cols */
-      // );
     }
 
     // Case 2
@@ -784,26 +690,17 @@ public class TestPartialIndex extends TestIndex {
             -1, /* ref_write_index */
             new ArrayList<String>(), /* matching_cols */
             new ArrayList<List<String>>(), /* differing_cols_list */
-            false /* should_fail */),
+            false, /* should_fail */
+            true /* use_insert_stmt */),
           new Write(
             false, /* predicate */
             0, /* ref_write_index */
             matching_cols, /* matching_cols */
             Arrays.asList(new ArrayList<String>(covering_cols)), /* differing_cols_list */
-            false /* should_fail */)
+            false, /* should_fail */
+            true /* use_insert_stmt */)
         )
       );
-
-      // Older version of test case below.
-      // List<List<String>> differ_cols_list = new ArrayList<List<String>>();
-      // differ_cols_list.add(new ArrayList<String>(covering_cols));
-      // testBackToBackWrite(
-      //   cols_in_index,
-      //   false /* existing_pred */,
-      //   false /* new_row_pred */,
-      //   match_cols, /* new row should match on these cols */
-      //   differ_cols_list /* new row should differ on these cols */
-      // );
     }
 
     // pred=true (Same I && C cols), Same pk row exists with pred=true.
@@ -819,24 +716,17 @@ public class TestPartialIndex extends TestIndex {
             -1, /* ref_write_index */
             new ArrayList<String>(), /* matching_cols */
             new ArrayList<List<String>>(), /* differing_cols_list */
-            false /* should_fail */),
+            false, /* should_fail */
+            true /* use_insert_stmt */),
           new Write(
             true, /* predicate */
             0, /* ref_write_index */
             matching_cols, /* matching_cols */
             new ArrayList<List<String>>(), /* differing_cols_list */
-            false /* should_fail */)
+            false, /* should_fail */
+            true /* use_insert_stmt */)
         )
       );
-
-      // Older version of test case below.
-      // testBackToBackWrite(
-      //   cols_in_index,
-      //   true /* existing_pred */,
-      //   true /* new_row_pred */,
-      //   matching_cols, /* new row should match on these cols */
-      //   new ArrayList<List<String>>() /* new row should differ on these cols */
-      // );
     }
 
     // pred=true (Diff I || C cols), Same pk row exists with pred=true.
@@ -855,24 +745,17 @@ public class TestPartialIndex extends TestIndex {
             -1, /* ref_write_index */
             new ArrayList<String>(), /* matching_cols */
             new ArrayList<List<String>>(), /* differing_cols_list */
-            false /* should_fail */),
+            false, /* should_fail */
+            true /* use_insert_stmt */),
           new Write(
             true, /* predicate */
             0, /* ref_write_index */
             matching_cols, /* matching_cols */
             Arrays.asList(new ArrayList<String>(indexed_cols)), /* differing_cols_list */
-            false /* should_fail */)
+            false, /* should_fail */
+            true /* use_insert_stmt */)
         )
       );
-
-      // Older version of test case below.
-      // testBackToBackWrite(
-      //   cols_in_index,
-      //   true /* existing_pred */,
-      //   true /* new_row_pred */,
-      //   matching_cols, /* new row should match on these cols */
-      //   differ_cols_list /* new row should differ on these cols */
-      // );
     }
 
     // Case 2
@@ -887,24 +770,17 @@ public class TestPartialIndex extends TestIndex {
             -1, /* ref_write_index */
             new ArrayList<String>(), /* matching_cols */
             new ArrayList<List<String>>(), /* differing_cols_list */
-            false /* should_fail */),
+            false, /* should_fail */
+            true /* use_insert_stmt */),
           new Write(
             true, /* predicate */
             0, /* ref_write_index */
             matching_cols, /* matching_cols */
             Arrays.asList(new ArrayList<String>(covering_cols)), /* differing_cols_list */
-            false /* should_fail */)
+            false, /* should_fail */
+            true /* use_insert_stmt */)
         )
       );
-
-      // Older version of test case below.
-      // testBackToBackWrite(
-      //   cols_in_index,
-      //   true /* existing_pred */,
-      //   true /* new_row_pred */,
-      //   match_cols, /* new row should match on these cols */
-      //   differ_cols_list /* new row should differ on these cols */
-      // );
     }
 
     // pred=false (Same I && C cols), Same pk row exists with pred=true.
@@ -916,24 +792,17 @@ public class TestPartialIndex extends TestIndex {
             -1, /* ref_write_index */
             new ArrayList<String>(), /* matching_cols */
             new ArrayList<List<String>>(), /* differing_cols_list */
-            false /* should_fail */),
+            false, /* should_fail */
+            true /* use_insert_stmt */),
           new Write(
             false, /* predicate */
             0, /* ref_write_index */
             getPk(this.col_names), /* matching_cols */
             new ArrayList<List<String>>(), /* differing_cols_list */
-            false /* should_fail */)
+            false, /* should_fail */
+            true /* use_insert_stmt */)
         )
       );
-
-      // Older version of test case below.
-      // testBackToBackWrite(
-      //   cols_in_index,
-      //   true /* existing_pred */,
-      //   false /* new_row_pred */,
-      //   getPk(this.col_names), /* new row should match on these cols */
-      //   new ArrayList<List<String>>() /* new row should differ on these cols */
-      // );
     }
 
     // pred=false (Diff I || C cols), Same pk row exists with pred=true.
@@ -952,24 +821,17 @@ public class TestPartialIndex extends TestIndex {
             -1, /* ref_write_index */
             new ArrayList<String>(), /* matching_cols */
             new ArrayList<List<String>>(), /* differing_cols_list */
-            false /* should_fail */),
+            false, /* should_fail */
+            true /* use_insert_stmt */),
           new Write(
             false, /* predicate */
             0, /* ref_write_index */
             matching_cols, /* matching_cols */
             Arrays.asList(new ArrayList<String>(indexed_cols)), /* differing_cols_list */
-            false /* should_fail */)
+            false, /* should_fail */
+            true /* use_insert_stmt */)
         )
       );
-
-      // Older version of test case below.
-      // testBackToBackWrite(
-      //   cols_in_index,
-      //   true /* existing_pred */,
-      //   false /* new_row_pred */,
-      //   matching_cols, /* new row should match on these cols */
-      //   differ_cols_list /* new row should differ on these cols */
-      // );
     }
 
     // Case 2:
@@ -984,35 +846,29 @@ public class TestPartialIndex extends TestIndex {
             -1, /* ref_write_index */
             new ArrayList<String>(), /* matching_cols */
             new ArrayList<List<String>>(), /* differing_cols_list */
-            false /* should_fail */),
+            false, /* should_fail */
+            true /* use_insert_stmt */),
           new Write(
             false, /* predicate */
             0, /* ref_write_index */
             matching_cols, /* matching_cols */
             Arrays.asList(new ArrayList<String>(covering_cols)), /* differing_cols_list */
-            false /* should_fail */)
+            false, /* should_fail */
+            true /* use_insert_stmt */)
         )
       );
-
-      // Older version of test case below.
-      // testBackToBackWrite(
-      //   cols_in_index,
-      //   true /* existing_pred */,
-      //   false /* new_row_pred */,
-      //   match_cols, /* new row should match on these cols */
-      //   differ_cols_list /* new row should differ on these cols */
-      // );
     }
 
-    resetTableAndIndex();
-
-    //  Upsert (UPI):
-    //                                                                       ____________________________________
-    //                                                                       |   pred=true     |   pred=false   | 
-    //     |-----------------------------------------------------------------|-----------------|----------------|
-    //     | Exists a row with diff pk, same indexed columns, with pred=true |    FAIL OP      |     No-op      |
-    //     | and the existing row with same pk has pred=false                |                 |                |
-    //     |-----------------------------------------------------------------|-----------------|----------------|
+    // Update - extra cases applicable only to unique partial indexes.
+    // ---------------------------------------------------------------
+    //                   ___________________________________________________________________
+    //                  | Table has arow with diff pk, same indexed columns, with pred=true |
+    //                  | and another row with same pk with pred=false                      |
+    //     |------------|-------------------------------------------------------------------|
+    //     | pred=true  |    FAIL OP                                                        |
+    //     |------------+-------------------------------------------------------------------|
+    //     | pred=false |    No-op                                                          |
+    //     |--------------------------------------------------------------------------------|
 
     if (is_unique && this.same_i_diff_pk_mulitple_pred_true_rows) { // For the second existing row and new row
       this.performWrites(cols_in_index,
@@ -1022,126 +878,25 @@ public class TestPartialIndex extends TestIndex {
             -1, /* ref_write_index */
             new ArrayList<String>(), /* matching_cols */
             new ArrayList<List<String>>(), /* differing_cols_list */
-            false /* should_fail */),
+            false, /* should_fail */
+            true /* use_insert_stmt */),
           new Write(
             false, /* predicate */
             0, /* ref_write_index */
             new ArrayList<String>(), /* matching_cols */
             Arrays.asList(getPk(col_names)), /* differing_cols_list */
-            false /* should_fail */),
+            false, /* should_fail */
+            true /* use_insert_stmt */),
           new Write(
             true, /* predicate */
             1, /* ref_write_index */
             getPk(col_names), /* matching_cols */
             new ArrayList<List<String>>(), /* differing_cols_list */
-            true /* should_fail */)
+            true, /* should_fail */
+            true /* use_insert_stmt */)
         )
       );
-
-      // Older version of test case below.
-      // List<String> existing_pred_true_row = getUnusedPredTrueRow();
-      // List<List<String>> differ_cols_list = new ArrayList<List<String>>();
-      // differ_cols_list.add(getPk(col_names));
-      // List<String> existing_pred_false_row = getUnusedPredFalseRow(
-      //   existing_pred_true_row, new ArrayList<String>() /* matching_cols */,
-      //   differ_cols_list);
-
-      // session.execute(
-      //   String.format("INSERT INTO %s(%s) VALUES (%s)",
-      //     test_table_name,
-      //     String.join(",", col_names),
-      //     String.join(",", existing_pred_true_row)));
-      // session.execute(
-      //   String.format("INSERT INTO %s(%s) VALUES (%s)",
-      //     test_table_name,
-      //     String.join(",", col_names),
-      //     String.join(",", existing_pred_false_row)));
-
-      // assertIndex(cols_in_index);
-
-      // String new_row = String.join(", ", getUnusedPredTrueRow(
-      //   existing_pred_false_row,
-      //   getPk(col_names),
-      //   new ArrayList<List<String>>() /* differing_cols_list */));
-
-      // runInvalidStmt(
-      //   String.format("INSERT INTO %s(%s) VALUES (%s)",
-      //     test_table_name,
-      //     String.join(",", col_names),
-      //     new_row)
-      // );
-      // resetTableAndIndex();
     }
-
-    // UPDATE
-    // ------
-    //
-    //    True Update: There is an existing row with same pk. Same as Upsert case in INSERT.
-
-    //    Upsert: There is no existing row with same pk.
-    //       ___________________________________
-    //      |   pred=true      |   pred=false   |
-    //      |------------------|----------------|
-    //      |  Insert into PI  |    No-op       |
-    //      -------------------------------------
-
-    // Case with pred=true.
-    List<String> row = getUnusedPredTrueRow();
-    List<String> where_clause_elems = new ArrayList<String>();
-    for (int i=0; i<this.pk_col_cnt; i++) {
-      where_clause_elems.add(col_names.get(i) + "=" + row.get(i));
-    }
-
-    String set_clause = "";
-    for (int i=this.pk_col_cnt; i<this.col_cnt; i++) {
-      set_clause += col_names.get(i) + "=" + row.get(i);
-    }
-
-    session.execute(
-      String.format("UPDATE %s SET %s WHERE %s",
-        test_table_name,
-        set_clause,
-        String.join(" and ", where_clause_elems)));
-
-    // If all non-pk non-static cols were NULL, then the UPDATE actually
-    // wouldn't result in an insert. In that case un mark the use true pred row.
-    boolean all_null = true;
-    for (int i=this.pk_col_cnt; i<this.col_cnt; i++) {
-      if (!row.get(i).equalsIgnoreCase("null")) {
-        all_null = false;
-        break;
-      }
-    }
-    if (all_null)
-      markPredTrueRowUnused(row);
-
-    assertIndex(cols_in_index);
-
-    resetTableAndIndex();
-
-    // Case with pred=false.
-    row = getUnusedPredFalseRow();
-
-    where_clause_elems = new ArrayList<String>();
-    for (int i=0; i<this.pk_col_cnt; i++) {
-      where_clause_elems.add(col_names.get(i) + "=" + row.get(i));
-    }
-
-    set_clause = "";
-    for (int i=this.pk_col_cnt; i<this.col_cnt; i++) {
-      set_clause += col_names.get(i) + "=" + row.get(i);
-    }
-
-    session.execute(
-      String.format("UPDATE %s SET %s WHERE %s",
-        test_table_name,
-        set_clause,
-        String.join(" and ", where_clause_elems)));
-
-    assertIndex(cols_in_index);
-
-    // Reset.
-    resetTableAndIndex();
   }
 
   public void testPartialIndexDeletesInternal() throws Exception {
