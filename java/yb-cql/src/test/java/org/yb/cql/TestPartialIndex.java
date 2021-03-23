@@ -62,12 +62,14 @@ public class TestPartialIndex extends TestIndex {
   //
   //   1. I have seen all tests in TestIndex.java. Again, check if any of the tests there make
   //      sense here (i.e., those which surely need to be tested for partial indexes as well).
-  //   2. Test clustering indexes with predicates
+  //   2. Test clustering indexes and orderby with predicates - low priority
   //   3. For tests that require inserting a few rows before assertions, try to insert rows
   //      via INSERT and UPDATE statements both i.e., all tests will then have 2 variations, those
-  //      that use INSERT/those that use UPDATE to insert a row.
-  //   4. Run tests in batch mode (OR) in a transaction block.
-  //   5. Ensure each flag is true atleast once.
+  //      that use INSERT/those that use UPDATE to insert a row. - high priority
+  //   4. Run tests in batch mode (OR) in a transaction block. - high priority
+  //   5. Ensure each same/diff* flag is true atleast once in some combination of predicate, indexed
+  //      cols,covering cols. - high priority
+  //   6. Complete testPartialIndexDeletesInternal() - high priority
 
   private static final Logger LOG = LoggerFactory.getLogger(TestPartialIndex.class);
 
@@ -899,6 +901,68 @@ public class TestPartialIndex extends TestIndex {
     }
   }
 
+  /**
+   * The most imporant internal method to test partial indexes for a specific choice of predicate,
+   * indexed columns and covering columns. This method exhaustively tests INSERT/UPDATE (see the
+   * matrices in the function for each detailed case) for the combination of predicate, indexed cols
+   * and covering cols provided.
+   * 
+   * Note that we require the caller to specify required object variables (like some pred=true/false
+   * rows, some properties of the specific combination i.e., the same_pk* flags, etc) before calling
+   * this because it is a hard problem to generate rows that satisfy predicates and decipher
+   * properties of a combination. Instead it is easier for a human to give all this information.
+   *
+   * The following test cases are included in this -
+   *
+   *  1. Insert (semantically; not talking about INSERT statement i.e., write a row with pk
+   *             that doesn't exist in table)
+   *  2. Update (semantically; not talking about UPDATE statement i.e., write a row with pk
+   *              that already exists in table)
+   *
+   * Both of the above involve writes which can be performed by using either -
+   *      a) INSERT statement.
+   *      b) UPDATE statement.
+   *
+   * So each test case with n writes is internally executed 2^n times with different combinations
+   * of INSERT/UPDATE statements.
+   *
+   * @param predicate
+   * @param indexed_cols the columns which are to be indexed.
+   * @param covering_cols the columns to be covered.
+   * @param strongConsistency
+   * @param is_unique test on a unique index
+   */
+  public void testPartialIndexSelectsInternal(
+      String predicate, List<String> indexed_cols, List<String> covering_cols,
+      boolean strongConsistency, boolean is_unique) throws Exception {
+    String include_clause = "";
+    if (covering_cols.size() > 0) {
+      include_clause = String.format("INCLUDE (%s)", covering_cols);
+    }
+
+    List<String> cols_in_index = new ArrayList<String>();
+    cols_in_index.addAll(indexed_cols);
+    cols_in_index.remove(covering_cols); // Remove duplicates.
+    cols_in_index.addAll(covering_cols);
+    cols_in_index.remove(getPk(this.col_names)); // Remove duplicates.
+    cols_in_index.addAll(getPk(this.col_names));
+
+    // Create index.
+    createIndex(
+      String.format("CREATE %s INDEX idx ON %s(%s) %s WHERE %s",
+        is_unique ? "UNIQUE" : "", test_table_name, String.join(", ", indexed_cols),
+        include_clause, predicate),
+      strongConsistency);
+
+    // Test where partial index is chosen over main table.
+
+    // Test where partial index is can't be chosen (WHERE clause doesn't imply predicate).
+
+    // Test where two partial indexes of different predicate length are implied by WHERE clause.
+    // We have to choose index which has more number of column operator expressions matching with
+    // WHERE clause.
+  }
+
   public void testPartialIndexDeletesInternal() throws Exception {
 
   }
@@ -942,6 +1006,13 @@ public class TestPartialIndex extends TestIndex {
     this.already_inserted_false_rows = new ArrayList<Integer>();
 
     testPartialIndexWritesInternal(
+      "v1=NULL", /* predicate */
+      Arrays.asList("v1"), /* indexed_cols */
+      Arrays.asList(), /* covering_cols */
+      strongConsistency,
+      is_unique);
+
+    testPartialIndexSelectsInternal(
       "v1=NULL", /* predicate */
       Arrays.asList("v1"), /* indexed_cols */
       Arrays.asList(), /* covering_cols */

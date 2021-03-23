@@ -69,7 +69,7 @@ class IndexInfo {
   }
   const IndexPermissions index_permissions() const { return index_permissions_; }
 
-  const QLExpressionPB predicate() const { return predicate_; }
+  const QLExpressionPB& predicate() const { return predicate_; }
 
   const bool has_predicate() const { return has_predicate_; }
 

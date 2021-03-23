@@ -22,7 +22,10 @@
 #include "yb/client/client.h"
 #include "yb/client/table.h"
 
+#include "yb/common/common.pb.h"
 #include "yb/common/index.h"
+#include "yb/yql/cql/ql/exec/executor.h"
+#include "yb/yql/cql/ql/ptree/column_arg.h"
 #include "yb/yql/cql/ql/ptree/sem_context.h"
 #include "yb/util/flag_tags.h"
 
@@ -112,6 +115,10 @@ class Selectivity {
       return single_key_read_ > other.single_key_read_;
     }
 
+    // Which one gets more weight -
+    //    1. A full table scan partial index vs a non-full table scan?
+    //    2. A non-covering partial index vs a covering non-partial index?
+
     // If one is a full-table scan and the other is not, prefer the one that is not.
     if (full_table_scan_ != other.full_table_scan_) {
       return full_table_scan_ < other.full_table_scan_;
@@ -119,6 +126,16 @@ class Selectivity {
 
     // When neither is a full table scan, compare the scan ranges.
     if (!full_table_scan_ && !other.full_table_scan_) {
+      // If one of the indexes is partial and the WHERE clause implies its predicate, pick
+      // that index.
+      if (where_clause_implies_predicate_ != other.where_clause_implies_predicate_)
+        return where_clause_implies_predicate_ > other.where_clause_implies_predicate_;
+
+      // If both indexes are parital and satisfy the implication test,
+      // pick one which contains more clauses from WHERE in index predicate.
+      // More where clauses in index predicate roughly imply a smaller index.
+      if (where_clause_implies_predicate_ && other.where_clause_implies_predicate_)
+        return predicate_len_ > other.predicate_len_;
 
       // If the fully-specified prefixes are different, prefer the one with longer prefix.
       if (prefix_length_ != other.prefix_length_) {
@@ -131,12 +148,26 @@ class Selectivity {
         return ends_with_range_ > other.ends_with_range_;
       }
 
+      // TODO: Also check which one has a longer matching set range cols (such that
+      // all in same/ all in opposite of query direction)?
+
       // If the numbers of non-primary-key column operators needs to be evaluated are different,
       // prefer the one with less.
       if (num_non_key_ops_ != other.num_non_key_ops_) {
         return num_non_key_ops_ < other.num_non_key_ops_;
       }
     }
+
+    // If one of the indexes is partial and the WHERE clause implies its predicate, pick
+    // that index.
+    if (where_clause_implies_predicate_ != other.where_clause_implies_predicate_)
+      return where_clause_implies_predicate_ > other.where_clause_implies_predicate_;
+
+    // If both indexes are parital and satisfy the implication test,
+    // pick one which contains more clauses from WHERE in index predicate.
+    // More where clauses in index predicate roughly imply a smaller index.
+    if (where_clause_implies_predicate_ && other.where_clause_implies_predicate_)
+      return predicate_len_ > other.predicate_len_;
 
     // If one covers the read fully and the other does not, prefer the one that does.
     if (covers_fully_ != other.covers_fully_) {
@@ -164,6 +195,80 @@ class Selectivity {
   // Analyze selectivity, currently defined as length of longest fully specified prefix and
   // whether there is a range operator immediately after the prefix.
   using MCIdToIndexMap = MCUnorderedMap<int, size_t>;
+
+  bool ExprInOps(const QLExpressionPB& predicate,
+                 MCUnorderedMap<int, MCVector<const ColumnOp*>> &col_id_ops_map) {
+    if (predicate.has_condition()) {
+      switch (predicate.condition().op()) {
+        case QL_OP_AND:
+          return ExprInOps(predicate.condition().operands(0), col_id_ops_map) &&
+            ExprInOps(predicate.condition().operands(1), col_id_ops_map);
+        case QL_OP_EQUAL:
+        case QL_OP_NOT_EQUAL:
+        case QL_OP_GREATER_THAN:
+        case QL_OP_GREATER_THAN_EQUAL:
+        case QL_OP_LESS_THAN_EQUAL:
+        case QL_OP_LESS_THAN: {
+          RSTATUS_DCHECK(predicate.condition().operands(0).has_column_id(),
+            InternalError, "Complex expressions not supported in index predicate");
+          RSTATUS_DCHECK(predicate.condition().operands(1).has_value(),
+            InternalError, "Complex expressions not supported in index predicate");
+          predicate_len_ = predicate_len_ + 1;
+          int col_id_in_pred = predicate.condition().operands(0).column_id();
+          QLValuePB value_in_pred = predicate.condition().operands(0).value();
+          if (col_id_ops_map.find(col_id_in_pred) == col_id_ops_map.end())
+            return false;
+          for (const ColumnOp* col_op : col_id_ops_map[col_id_in_pred]) {
+            if (col_op->expr()->ql_op() != predicate.condition().op()) continue;
+            if (col_op->expr()->op1()->expr_op() != ExprOperator::kRef) continue;
+            if (col_op->expr()->op2()->expr_op() != ExprOperator::kConst) continue;
+            if (((PTRef*) col_op->expr()->op1().get())->desc()->id() != col_id_in_pred) continue;
+            // TODO (Piyush): To support arbitrary values, we need PTConstToPB() and that
+            // needs some refactor to be able to use here. For now we are checking only for NULLs
+            // and integers.
+            // QLValuePB value_pb;
+            // RETURN_NOT_OK(PTConstToPB(col_op->expr()->op2(), &value_pb));
+            // if (static_cast<PTRef*>(col_op->expr()->op1().get())->desc()->id() == col_id_in_pred &&
+            //     value_pb == value_in_pred)
+            //   return true;
+          }
+          return false;
+        }
+        default:
+          DCHECK(false) << "Complex expressions not supported in index predicate. Should have been"
+            " blocked in index create itself";
+          return false;
+      }
+    }
+    DCHECK(false) << "Complex expressions not supported in index predicate. Should have been"
+      " blocked in index create itself";
+    return false;
+  }
+
+  bool WhereClauseImpliesPred(const MCVector<ColumnOp> &where_clause_key_ops,
+                              const MCList<ColumnOp> &where_clause_ops,
+                              const QLExpressionPB& predicate,
+                              MemoryContext *memctx) {
+    // Column Id to op map
+    MCUnorderedMap<int, MCVector<const ColumnOp*>> col_id_ops_map(memctx);
+    // TODO(Piyush): Convert this to a list for each col id: to support < and >.
+    for (const ColumnOp& col_op : where_clause_key_ops) {
+      int col_id = col_op.desc()->id();
+      if (col_id_ops_map.find(col_id) == col_id_ops_map.end())
+        col_id_ops_map[col_id] = MCVector<const ColumnOp*>(memctx);
+      col_id_ops_map[col_id].push_back(&col_op);
+    }
+
+    for (const ColumnOp& col_op : where_clause_ops) {
+      int col_id = col_op.desc()->id();
+      if (col_id_ops_map.find(col_id) == col_id_ops_map.end())
+        col_id_ops_map[col_id] = MCVector<const ColumnOp*>(memctx);
+      col_id_ops_map[col_id].push_back(&col_op);
+    }
+
+    return ExprInOps(predicate, col_id_ops_map);
+  }
+
   void Analyze(MemoryContext *memctx,
                const PTSelectStmt& stmt,
                const MCIdToIndexMap& id_to_idx,
@@ -226,6 +331,9 @@ class Selectivity {
     single_key_read_ = prefix_length_ >= num_key_columns;
     full_table_scan_ = prefix_length_ < num_hash_key_columns;
     ends_with_range_ = prefix_length_ < ops.size() && ops[prefix_length_] == OpSelectivity::kRange;
+    where_clause_implies_predicate_ = index_info_->has_predicate() &&
+      WhereClauseImpliesPred(
+        stmt.key_where_ops(), stmt.where_ops(), index_info_->predicate(), memctx);
   }
 
   TableId index_id_;      // Index table id (null for indexed table).
@@ -237,6 +345,9 @@ class Selectivity {
   size_t num_non_key_ops_ = 0; // How many non-primary-key column operators needs to be evaluated?
   bool covers_fully_ = false;  // Does the index cover the read fully? (true for indexed table)
   const IndexInfo* index_info_ = nullptr;
+  bool where_clause_implies_predicate_ = false; // True if it is a partial index and the where
+    // clause implies the index predicate.
+  int predicate_len_ = 0; // Length of index predicate. Stays 0 if it is a partial index.
 };
 
 } // namespace
