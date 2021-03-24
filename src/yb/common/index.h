@@ -71,7 +71,7 @@ class IndexInfo {
 
   const QLExpressionPB& predicate() const { return predicate_; }
 
-  const bool has_predicate() const { return has_predicate_; }
+  bool has_predicate() const { return has_predicate_; }
 
   // Return column ids that are primary key columns of the indexed table.
   std::vector<ColumnId> index_key_column_ids() const;

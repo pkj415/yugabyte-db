@@ -24,6 +24,7 @@
 
 #include "yb/common/common.pb.h"
 #include "yb/common/index.h"
+#include "yb/util/status.h"
 #include "yb/yql/cql/ql/exec/executor.h"
 #include "yb/yql/cql/ql/ptree/column_arg.h"
 #include "yb/yql/cql/ql/ptree/sem_context.h"
@@ -87,11 +88,13 @@ class Selectivity {
   }
 
   // Selectivity of an index.
-  Selectivity(MemoryContext *memctx, const PTSelectStmt& stmt, const IndexInfo& index_info)
+  Selectivity(MemoryContext *memctx, const PTSelectStmt& stmt, const IndexInfo& index_info,
+              int predicate_len)
       : index_id_(index_info.table_id()),
         is_local_(index_info.is_local()),
         covers_fully_(stmt.CoversFully(index_info)),
-        index_info_(&index_info) {
+        index_info_(&index_info),
+        predicate_len_(predicate_len) {
 
     MCIdToIndexMap id_to_idx(memctx);
     for (size_t i = 0; i < index_info.key_column_count(); i++) {
@@ -115,9 +118,10 @@ class Selectivity {
       return single_key_read_ > other.single_key_read_;
     }
 
-    // Which one gets more weight -
-    //    1. A full table scan partial index vs a non-full table scan?
-    //    2. A non-covering partial index vs a covering non-partial index?
+    // In case of partial indexes, which one gets more preference -
+    //    1. A full partial index scan vs a non-full table/index scan? - A non-full scan.
+    //    2. A non-covering partial index vs a covering non-partial index? - Non-covering partial
+    //       index.
 
     // If one is a full-table scan and the other is not, prefer the one that is not.
     if (full_table_scan_ != other.full_table_scan_) {
@@ -126,15 +130,10 @@ class Selectivity {
 
     // When neither is a full table scan, compare the scan ranges.
     if (!full_table_scan_ && !other.full_table_scan_) {
-      // If one of the indexes is partial and the WHERE clause implies its predicate, pick
-      // that index.
-      if (where_clause_implies_predicate_ != other.where_clause_implies_predicate_)
-        return where_clause_implies_predicate_ > other.where_clause_implies_predicate_;
-
-      // If both indexes are parital and satisfy the implication test,
-      // pick one which contains more clauses from WHERE in index predicate.
-      // More where clauses in index predicate roughly imply a smaller index.
-      if (where_clause_implies_predicate_ && other.where_clause_implies_predicate_)
+      // If one of the indexes is partial pick that index.
+      // If both are partial, pick one which has a longer predicate.
+      // If both are partial and have same predicate len, we defer to non-partial index rules.
+      if (predicate_len_ != other.predicate_len_)
         return predicate_len_ > other.predicate_len_;
 
       // If the fully-specified prefixes are different, prefer the one with longer prefix.
@@ -158,15 +157,10 @@ class Selectivity {
       }
     }
 
-    // If one of the indexes is partial and the WHERE clause implies its predicate, pick
-    // that index.
-    if (where_clause_implies_predicate_ != other.where_clause_implies_predicate_)
-      return where_clause_implies_predicate_ > other.where_clause_implies_predicate_;
-
-    // If both indexes are parital and satisfy the implication test,
-    // pick one which contains more clauses from WHERE in index predicate.
-    // More where clauses in index predicate roughly imply a smaller index.
-    if (where_clause_implies_predicate_ && other.where_clause_implies_predicate_)
+    // If one of the indexes is partial pick that index.
+    // If both are partial, pick one which has a longer predicate.
+    // If both are partial and have same predicate len, we defer to non-partial index rules.
+    if (predicate_len_ != other.predicate_len_)
       return predicate_len_ > other.predicate_len_;
 
     // If one covers the read fully and the other does not, prefer the one that does.
@@ -186,88 +180,15 @@ class Selectivity {
   string ToString() const {
     return strings::Substitute("Selectivity: index_id $0 is_local $1 prefix_length $2 "
                                "single_key_read $3 full_table_scan $4 ends_with_range $5 "
-                               "covers_fully $6", index_id_, is_local_, prefix_length_,
-                               single_key_read_, full_table_scan_, ends_with_range_,
-                               covers_fully_);
+                               "covers_fully $6 predicate_len $7", index_id_, is_local_,
+                               prefix_length_, single_key_read_, full_table_scan_, ends_with_range_,
+                               covers_fully_, predicate_len_);
   }
 
  private:
   // Analyze selectivity, currently defined as length of longest fully specified prefix and
   // whether there is a range operator immediately after the prefix.
   using MCIdToIndexMap = MCUnorderedMap<int, size_t>;
-
-  bool ExprInOps(const QLExpressionPB& predicate,
-                 MCUnorderedMap<int, MCVector<const ColumnOp*>> &col_id_ops_map) {
-    if (predicate.has_condition()) {
-      switch (predicate.condition().op()) {
-        case QL_OP_AND:
-          return ExprInOps(predicate.condition().operands(0), col_id_ops_map) &&
-            ExprInOps(predicate.condition().operands(1), col_id_ops_map);
-        case QL_OP_EQUAL:
-        case QL_OP_NOT_EQUAL:
-        case QL_OP_GREATER_THAN:
-        case QL_OP_GREATER_THAN_EQUAL:
-        case QL_OP_LESS_THAN_EQUAL:
-        case QL_OP_LESS_THAN: {
-          RSTATUS_DCHECK(predicate.condition().operands(0).has_column_id(),
-            InternalError, "Complex expressions not supported in index predicate");
-          RSTATUS_DCHECK(predicate.condition().operands(1).has_value(),
-            InternalError, "Complex expressions not supported in index predicate");
-          predicate_len_ = predicate_len_ + 1;
-          int col_id_in_pred = predicate.condition().operands(0).column_id();
-          QLValuePB value_in_pred = predicate.condition().operands(0).value();
-          if (col_id_ops_map.find(col_id_in_pred) == col_id_ops_map.end())
-            return false;
-          for (const ColumnOp* col_op : col_id_ops_map[col_id_in_pred]) {
-            if (col_op->expr()->ql_op() != predicate.condition().op()) continue;
-            if (col_op->expr()->op1()->expr_op() != ExprOperator::kRef) continue;
-            if (col_op->expr()->op2()->expr_op() != ExprOperator::kConst) continue;
-            if (((PTRef*) col_op->expr()->op1().get())->desc()->id() != col_id_in_pred) continue;
-            // TODO (Piyush): To support arbitrary values, we need PTConstToPB() and that
-            // needs some refactor to be able to use here. For now we are checking only for NULLs
-            // and integers.
-            // QLValuePB value_pb;
-            // RETURN_NOT_OK(PTConstToPB(col_op->expr()->op2(), &value_pb));
-            // if (static_cast<PTRef*>(col_op->expr()->op1().get())->desc()->id() == col_id_in_pred &&
-            //     value_pb == value_in_pred)
-            //   return true;
-          }
-          return false;
-        }
-        default:
-          DCHECK(false) << "Complex expressions not supported in index predicate. Should have been"
-            " blocked in index create itself";
-          return false;
-      }
-    }
-    DCHECK(false) << "Complex expressions not supported in index predicate. Should have been"
-      " blocked in index create itself";
-    return false;
-  }
-
-  bool WhereClauseImpliesPred(const MCVector<ColumnOp> &where_clause_key_ops,
-                              const MCList<ColumnOp> &where_clause_ops,
-                              const QLExpressionPB& predicate,
-                              MemoryContext *memctx) {
-    // Column Id to op map
-    MCUnorderedMap<int, MCVector<const ColumnOp*>> col_id_ops_map(memctx);
-    // TODO(Piyush): Convert this to a list for each col id: to support < and >.
-    for (const ColumnOp& col_op : where_clause_key_ops) {
-      int col_id = col_op.desc()->id();
-      if (col_id_ops_map.find(col_id) == col_id_ops_map.end())
-        col_id_ops_map[col_id] = MCVector<const ColumnOp*>(memctx);
-      col_id_ops_map[col_id].push_back(&col_op);
-    }
-
-    for (const ColumnOp& col_op : where_clause_ops) {
-      int col_id = col_op.desc()->id();
-      if (col_id_ops_map.find(col_id) == col_id_ops_map.end())
-        col_id_ops_map[col_id] = MCVector<const ColumnOp*>(memctx);
-      col_id_ops_map[col_id].push_back(&col_op);
-    }
-
-    return ExprInOps(predicate, col_id_ops_map);
-  }
 
   void Analyze(MemoryContext *memctx,
                const PTSelectStmt& stmt,
@@ -331,9 +252,6 @@ class Selectivity {
     single_key_read_ = prefix_length_ >= num_key_columns;
     full_table_scan_ = prefix_length_ < num_hash_key_columns;
     ends_with_range_ = prefix_length_ < ops.size() && ops[prefix_length_] == OpSelectivity::kRange;
-    where_clause_implies_predicate_ = index_info_->has_predicate() &&
-      WhereClauseImpliesPred(
-        stmt.key_where_ops(), stmt.where_ops(), index_info_->predicate(), memctx);
   }
 
   TableId index_id_;      // Index table id (null for indexed table).
@@ -345,9 +263,7 @@ class Selectivity {
   size_t num_non_key_ops_ = 0; // How many non-primary-key column operators needs to be evaluated?
   bool covers_fully_ = false;  // Does the index cover the read fully? (true for indexed table)
   const IndexInfo* index_info_ = nullptr;
-  bool where_clause_implies_predicate_ = false; // True if it is a partial index and the where
-    // clause implies the index predicate.
-  int predicate_len_ = 0; // Length of index predicate. Stays 0 if it is a partial index.
+  int predicate_len_ = 0; // Length of index predicate. 0 if not a partial index.
 };
 
 } // namespace
@@ -421,6 +337,144 @@ Status PTSelectStmt::LookupIndex(SemContext *sem_context) {
   return Status::OK();
 }
 
+bool PTSelectStmt::ExprInOps(const QLExpressionPB& predicate,
+                             const std::unordered_map<int,
+                             std::vector<const ColumnOp*>> &col_id_ops_map,
+                             int *predicate_len) {
+  if (predicate.has_condition()) {
+    switch (predicate.condition().op()) {
+      case QL_OP_AND:
+        return ExprInOps(predicate.condition().operands(0), col_id_ops_map, predicate_len) &&
+          ExprInOps(predicate.condition().operands(1), col_id_ops_map, predicate_len);
+      case QL_OP_EQUAL:
+      case QL_OP_NOT_EQUAL:
+      case QL_OP_GREATER_THAN:
+      case QL_OP_GREATER_THAN_EQUAL:
+      case QL_OP_LESS_THAN_EQUAL:
+      case QL_OP_LESS_THAN: {
+        DCHECK(predicate.condition().operands(0).has_column_id()) <<
+          "Complex expressions not supported in index predicate";
+        DCHECK(predicate.condition().operands(1).has_value()) <<
+          "Complex expressions not supported in index predicate";
+        *predicate_len = *predicate_len + 1;
+        int col_id_in_pred = predicate.condition().operands(0).column_id();
+        QLValuePB value_in_pred = predicate.condition().operands(1).value();
+        if (col_id_ops_map.find(col_id_in_pred) == col_id_ops_map.end())
+          return false;
+        for (const ColumnOp* col_op : col_id_ops_map.at(col_id_in_pred)) {
+          LOG(INFO) << "Piyush - col_op ql_op=" << col_op->expr()->ql_op() <<
+            " predicate condition ql_op=" << predicate.condition().op();
+          if (col_op->yb_op() != predicate.condition().op()) continue;
+          if (col_op->desc()->id() != col_id_in_pred) continue;
+          if (col_op->expr()->expr_op() != ExprOperator::kConst) continue;
+
+          // We support only NULLs and int in index predicates for now.
+          switch (value_in_pred.value_case()) {
+            case QLValuePB::VALUE_NOT_SET: {
+              std::shared_ptr<PTNull> const_null_value = std::dynamic_pointer_cast<PTNull>(col_op->expr());
+              if (const_null_value) return true;
+              break;
+            }
+            case QLValuePB::kInt64Value: {
+              std::shared_ptr<PTConstInt> const_int_value = std::dynamic_pointer_cast<PTConstInt>(col_op->expr());
+              if (const_int_value && const_int_value->value() == value_in_pred.int64_value()) return true;
+
+              int64_t value;
+              std::shared_ptr<PTConstVarInt> const_varint_value = std::dynamic_pointer_cast<PTConstVarInt>(col_op->expr());
+              if (const_varint_value) {
+                if (!const_varint_value->ToInt64(&value, false).ok()) break;
+                if (value == value_in_pred.int64_value()) return true;
+              }
+              break;
+            }
+            case QLValuePB::kInt32Value: {
+              std::shared_ptr<PTConstInt> const_int_value = std::dynamic_pointer_cast<PTConstInt>(col_op->expr());
+              if (const_int_value && const_int_value->value() == value_in_pred.int32_value()) return true;
+
+              int64_t value;
+              std::shared_ptr<PTConstVarInt> const_varint_value = std::dynamic_pointer_cast<PTConstVarInt>(col_op->expr());
+              if (const_varint_value) {
+                if (!const_varint_value->ToInt64(&value, false).ok()) break;
+                if (value == value_in_pred.int32_value()) return true;
+              }
+              break;
+            }
+            case QLValuePB::kInt16Value: {
+              std::shared_ptr<PTConstInt> const_int_value = std::dynamic_pointer_cast<PTConstInt>(col_op->expr());
+              if (const_int_value && const_int_value->value() == value_in_pred.int16_value()) return true;
+
+              int64_t value;
+              std::shared_ptr<PTConstVarInt> const_varint_value = std::dynamic_pointer_cast<PTConstVarInt>(col_op->expr());
+              if (const_varint_value) {
+                if (!const_varint_value->ToInt64(&value, false).ok()) break;
+                if (value == value_in_pred.int16_value()) return true;
+              }
+              break;
+            }
+            case QLValuePB::kInt8Value: {
+              std::shared_ptr<PTConstInt> const_int_value = std::dynamic_pointer_cast<PTConstInt>(col_op->expr());
+              if (const_int_value && const_int_value->value() == value_in_pred.int8_value()) return true;
+
+              int64_t value;
+              std::shared_ptr<PTConstVarInt> const_varint_value = std::dynamic_pointer_cast<PTConstVarInt>(col_op->expr());
+              if (const_varint_value) {
+                if (!const_varint_value->ToInt64(&value, false).ok()) break;
+                if (value == value_in_pred.int8_value()) return true;
+              }
+              break;
+            }
+            default:
+              continue;
+          }
+
+          // TODO(Piyush): Support more complex tests for ints: e.g.,: v > 5 => v > 4. Right now
+          // we don't handle that.
+
+          // TODO (Piyush): To support arbitrary values, we need PTConstToPB() and that
+          // needs some refactor to be able to use here. For now we are checking only for NULLs
+          // and integers.
+          // QLValuePB value_pb;
+          // RETURN_NOT_OK(PTConstToPB(col_op->expr()->op2(), &value_pb));
+          // if (static_cast<PTRef*>(col_op->expr()->op1().get())->desc()->id() == col_id_in_pred &&
+          //     value_pb == value_in_pred)
+          //   return true;
+        }
+        return false;
+      }
+      default:
+        DCHECK(false) << "Complex expressions not supported in index predicate. Should have been"
+          " blocked in index create itself";
+        return false;
+    }
+  }
+  DCHECK(false) << "Complex expressions not supported in index predicate. Should have been"
+    " blocked in index create itself";
+  return false;
+}
+
+bool PTSelectStmt::WhereClauseImpliesPred(const MCVector<ColumnOp> &where_clause_key_ops,
+                                          const MCList<ColumnOp> &where_clause_ops,
+                                          const QLExpressionPB& predicate,
+                                          int *predicate_len) {
+  // Column Id to op map
+  std::unordered_map<int, std::vector<const ColumnOp*>> col_id_ops_map;
+
+  for (const ColumnOp& col_op : where_clause_key_ops) {
+    int col_id = col_op.desc()->id();
+    if (col_id_ops_map.find(col_id) == col_id_ops_map.end())
+      col_id_ops_map[col_id] = vector<const ColumnOp*>();
+    col_id_ops_map[col_id].push_back(&col_op);
+  }
+
+  for (const ColumnOp& col_op : where_clause_ops) {
+    int col_id = col_op.desc()->id();
+    if (col_id_ops_map.find(col_id) == col_id_ops_map.end())
+      col_id_ops_map[col_id] = vector<const ColumnOp*>();
+    col_id_ops_map[col_id].push_back(&col_op);
+  }
+
+  return ExprInOps(predicate, col_id_ops_map, predicate_len);
+}
 CHECKED_STATUS PTSelectStmt::Analyze(SemContext *sem_context) {
   // If use_cassandra_authentication is set, permissions are checked in PTDmlStmt::Analyze.
   RETURN_NOT_OK(PTDmlStmt::Analyze(sem_context));
@@ -524,6 +578,9 @@ CHECKED_STATUS PTSelectStmt::Analyze(SemContext *sem_context) {
       expr->CollectReferencedIndexColnames(&referenced_index_colnames_);
     }
 
+    // TODO(Piyush): If WHERE clause implies index predicate for a partial index, remove
+    // key conditions and filter conditions that are already taken care of by the index predicate.
+    // This is just an optimization.
     RETURN_NOT_OK(AnalyzeIndexes(sem_context));
     if (child_select_ && child_select_->covers_fully_) {
       return Status::OK();
@@ -562,6 +619,9 @@ ExplainPlanPB PTSelectStmt::AnalysisResultToPB() {
   } else if (select_has_primary_keys_set_) {
     select_plan->set_select_type("Primary Key Lookup on " + table_name().ToString());
   } else if (!(key_where_ops().empty() && partition_key_ops().empty())) {
+    // TODO(Piyush): Why call it range scan even when not all hash columns are present?
+    // Even when all hash columns are specified, there needs to be range operators on a prefix of
+    // range columns.
     select_plan->set_select_type("Range Scan on " + table_name().ToString());
   } else {
     select_plan->set_select_type("Seq Scan on " + table_name().ToString());
@@ -623,16 +683,28 @@ CHECKED_STATUS PTSelectStmt::AnalyzeIndexes(SemContext *sem_context) {
   selectivities.reserve(table_->index_map().size() + 1);
   selectivities.emplace_back(sem_context->PTempMem(), *this);
   for (const std::pair<TableId, IndexInfo> index : table_->index_map()) {
-    if (index.second.HasReadPermission()) {
-      selectivities.emplace_back(sem_context->PTempMem(), *this, index.second);
+    int predicate_len = 0;
+    // TODO(Piyush): We don't support json/subscripted ops in partial index predicates yet.
+    // Either block them on creation or fully support them.
+    if (index.second.has_predicate() &&
+        !WhereClauseImpliesPred(key_where_ops(), where_ops(), index.second.predicate(),
+          &predicate_len)) {
+      // For a partial index, if WHERE clause doesn't imply index predicate, don't use this index.
+      LOG(INFO) << "Piyush - where_clause_implies_predicate_=" << false << " for index_id=" <<
+        index.second.table_id();
+      continue;
     }
+    if (!index.second.HasReadPermission()) continue;
+
+    selectivities.emplace_back(sem_context->PTempMem(), *this, index.second, predicate_len);
   }
   std::sort(selectivities.begin(), selectivities.end(), std::greater<Selectivity>());
-  if (VLOG_IS_ON(3)) {
+  // if (VLOG_IS_ON(3)) {
     for (const auto& selectivity : selectivities) {
-      VLOG(3) << selectivity.ToString();
+      // VLOG(3) << selectivity.ToString();
+      LOG(INFO) << "Piyush - " << selectivity.ToString();
     }
-  }
+  // }
 
   // Find the best selectivity.
   for (const Selectivity& selectivity : selectivities) {

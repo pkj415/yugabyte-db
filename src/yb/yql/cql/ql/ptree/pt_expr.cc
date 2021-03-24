@@ -859,21 +859,12 @@ CHECKED_STATUS PTRelationExpr::AnalyzeOperator(SemContext *sem_context,
            op1->expr_op() == ExprOperator::kJsonOperatorRef ||
            op1->expr_op() == ExprOperator::kBcall);
     // TODO(Piyush): Block mutable functions.
-    // TODO(Piyush): For operators:
-    //    1. Implement eq/ineq counter check, maybe re-use Neil's code once his
-    //       split is done. Mostly try to re-use so that select stmnt where clause checks
-    //       act as a safety net for everything in create index. Add more checks before
-    //       to restrict partial indexes.
-    // if (op1->expr_op() != ExprOperator::kRef) {
-    //   return sem_context->Error(this,
-    //     "Parital index where clause only allows operators on table columns",
-    //     ErrorCode::FEATURE_NOT_SUPPORTED);
-    // }
-    // if (!QLType::IsNull(op2->ql_type_id())) {
-    //   return sem_context->Error(this,
-    //     "Parital index where clause only allows = NULL operator",
-    //     ErrorCode::FEATURE_NOT_SUPPORTED);
-    // }
+    // Allow only expressions involve columns. Block subscripted/json col+operators.
+    if (op1->expr_op() != ExprOperator::kRef) {
+      return sem_context->Error(this,
+        "Parital index where clause only allows operators on table columns",
+        ErrorCode::FEATURE_NOT_SUPPORTED);
+    }
   }
 
   return Status::OK();

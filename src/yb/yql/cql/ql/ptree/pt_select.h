@@ -266,6 +266,10 @@ class PTSelectStmt : public PTDmlStmt {
   CHECKED_STATUS AnalyzeLimitClause(SemContext *sem_context);
   CHECKED_STATUS AnalyzeOffsetClause(SemContext *sem_context);
   CHECKED_STATUS ConstructSelectedSchema();
+  bool ExprInOps(const QLExpressionPB& predicate, const std::unordered_map<int,
+    std::vector<const ColumnOp*>> &col_id_ops_map, int *predicate_len);
+  bool WhereClauseImpliesPred(const MCVector<ColumnOp> &where_clause_key_ops,
+    const MCList<ColumnOp> &where_clause_ops, const QLExpressionPB& predicate, int *predicate_len);
 
   // --- The parser will decorate this node with the following information --
 

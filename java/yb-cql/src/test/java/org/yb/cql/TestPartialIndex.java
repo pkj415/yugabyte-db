@@ -14,6 +14,8 @@ package org.yb.cql;
 
 import java.util.*;
 
+import com.datastax.driver.core.Row;
+
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -61,15 +63,19 @@ public class TestPartialIndex extends TestIndex {
   // TODO(Piyush):
   //
   //   1. I have seen all tests in TestIndex.java. Again, check if any of the tests there make
-  //      sense here (i.e., those which surely need to be tested for partial indexes as well).
+  //      sense here (i.e., those which surely need to be tested for partial indexes separately
+  //      as well).
   //   2. Test clustering indexes and orderby with predicates - low priority
   //   3. For tests that require inserting a few rows before assertions, try to insert rows
   //      via INSERT and UPDATE statements both i.e., all tests will then have 2 variations, those
   //      that use INSERT/those that use UPDATE to insert a row. - high priority
   //   4. Run tests in batch mode (OR) in a transaction block. - high priority
   //   5. Ensure each same/diff* flag is true atleast once in some combination of predicate, indexed
-  //      cols,covering cols. - high priority
+  //      cols, covering cols. - high priority
   //   6. Complete testPartialIndexDeletesInternal() - high priority
+  //   7. Add negative tests -
+  //        i) Block JSON/subscripted args
+  //        ii) Block mutable funcs
 
   private static final Logger LOG = LoggerFactory.getLogger(TestPartialIndex.class);
 
@@ -245,12 +251,12 @@ public class TestPartialIndex extends TestIndex {
   }
 
   /* Pick any row from user-provided pred=true rows that hasn't been picked yet such that it
-   * matches (and differs) with the given row on the specified columns (and column groups).
+   * matches (and differs) with the given reference row on the specified columns (and column groups).
    */
-  private List<String> getUnusedPredTrueRow(List<String> row, List<String> match_cols,
-                                            List<List<String>> differ_cols) {
+  private List<String> getUnusedPredTrueRow(List<String> reference_row, List<String> match_cols,
+                                            List<List<String>> differ_cols_list) {
     for (int i=0; i<pred_true_rows.size(); i++) {
-      if (match_rows(pred_true_rows.get(i), row, match_cols, differ_cols)) {
+      if (match_rows(pred_true_rows.get(i), reference_row, match_cols, differ_cols_list)) {
         if (!already_inserted_true_rows.contains(i)) {
           already_inserted_true_rows.add(i);
           markOtherPredTrueRowUnused(pred_true_rows.get(i));
@@ -262,10 +268,10 @@ public class TestPartialIndex extends TestIndex {
     return new ArrayList<String>();
   }
 
-  private List<String> getUnusedPredFalseRow(List<String> row, List<String> match_cols,
-                                             List<List<String>> differ_cols) {
+  private List<String> getUnusedPredFalseRow(List<String> reference_row, List<String> match_cols,
+                                             List<List<String>> differ_cols_list) {
     for (int i=0; i<pred_false_rows.size(); i++) {
-      if (match_rows(pred_false_rows.get(i), row, match_cols, differ_cols)) {
+      if (match_rows(pred_false_rows.get(i), reference_row, match_cols, differ_cols_list)) {
         if (!already_inserted_false_rows.contains(i)) {
           already_inserted_false_rows.add(i);
           markOtherPredTrueRowUnused(pred_false_rows.get(i));
@@ -281,6 +287,16 @@ public class TestPartialIndex extends TestIndex {
     return row.subList(0, this.pk_col_cnt);
   }
 
+  private void assert_presence_already_inserted_true_rows_presence(List<String> proj_cols,
+                                                                   Set<String> idx_tuples) {
+    for (int i=0; i<already_inserted_true_rows.size(); i++) {
+      String row = String.join(", ",
+        createRowProjection(pred_true_rows.get(already_inserted_true_rows.get(i)), proj_cols));
+      assertTrue(idx_tuples.contains("Row[" + row + "]"));
+    }
+    assertTrue(idx_tuples.size() == already_inserted_true_rows.size());
+  }
+
   private void assertIndex(List<String> cols_in_index) {
     List<String> mangled_cols_in_index = new ArrayList<String>();
     for (String col : cols_in_index) {
@@ -289,12 +305,15 @@ public class TestPartialIndex extends TestIndex {
 
     Set<String> idx_tuples = queryTable("idx", String.join(", ", mangled_cols_in_index));
 
-    for (int i=0; i<already_inserted_true_rows.size(); i++) {
-      String row = String.join(", ",
-        createRowProjection(pred_true_rows.get(already_inserted_true_rows.get(i)), cols_in_index));
-      assertTrue(idx_tuples.contains("Row[" + row + "]"));
+    assert_presence_already_inserted_true_rows_presence(cols_in_index, idx_tuples);
+  }
+
+  private Set<String> queryOutputToStringSet(String query) {
+    Set<String> rows = new HashSet<String>();
+    for (Row row : session.execute(query)) {
+      rows.add(row.toString());
     }
-    assertTrue(idx_tuples.size() == already_inserted_true_rows.size());
+    return rows;
   }
 
   private void resetTableAndIndex() {
@@ -353,7 +372,7 @@ public class TestPartialIndex extends TestIndex {
     resetTableAndIndex();
 
 
-    // TODO(Piyush): Integrate code to use UPDATE statement
+    // TODO(Piyush): Integrate below code to use UPDATE statement
     // List<String> row = getUnusedPredTrueRow();
     // List<String> where_clause_elems = new ArrayList<String>();
     // for (int i=0; i<this.pk_col_cnt; i++) {
@@ -399,15 +418,21 @@ public class TestPartialIndex extends TestIndex {
    *
    *  1. Insert (semantically; not talking about INSERT statement i.e., write a row with pk
    *             that doesn't exist in table)
-   *  2. Update (semantically; not talking about UPDATE statement i.e., write a row with pk
-   *              that already exists in table)
+   *    - 2 test-cases for non-unique indexes
+   *    - 4 test-cases for unique indexes
    *
-   * Both of the above involve writes which can be performed by using either -
+   *  2. Update (semantically; not talking about UPDATE statement i.e., write a row with pk
+   *             that already exists in table)
+   *    - 12 test-cases for non-unique indexes
+   *    - 2 test-cases for unique indexes
+   *
+   * All of the above test-cases involve a sequence of writes which can be performed by using
+   * either -
    *      a) INSERT statement.
    *      b) UPDATE statement.
    *
    * So each test case with n writes is internally executed 2^n times with different combinations
-   * of INSERT/UPDATE statements.
+   * of INSERT/UPDATE statements. This is a TODO.
    *
    * @param predicate
    * @param indexed_cols the columns which are to be indexed.
@@ -431,7 +456,6 @@ public class TestPartialIndex extends TestIndex {
     cols_in_index.remove(getPk(this.col_names)); // Remove duplicates.
     cols_in_index.addAll(getPk(this.col_names));
 
-    // Create index.
     createIndex(
       String.format("CREATE %s INDEX idx ON %s(%s) %s WHERE %s",
         is_unique ? "UNIQUE" : "", test_table_name, String.join(", ", indexed_cols),
@@ -899,85 +923,360 @@ public class TestPartialIndex extends TestIndex {
         )
       );
     }
+
+    session.execute("drop index idx");
   }
 
   /**
-   * The most imporant internal method to test partial indexes for a specific choice of predicate,
-   * indexed columns and covering columns. This method exhaustively tests INSERT/UPDATE (see the
-   * matrices in the function for each detailed case) for the combination of predicate, indexed cols
-   * and covering cols provided.
-   * 
-   * Note that we require the caller to specify required object variables (like some pred=true/false
-   * rows, some properties of the specific combination i.e., the same_pk* flags, etc) before calling
-   * this because it is a hard problem to generate rows that satisfy predicates and decipher
-   * properties of a combination. Instead it is easier for a human to give all this information.
+   * Internal method to test access method selection policy.
    *
-   * The following test cases are included in this -
-   *
-   *  1. Insert (semantically; not talking about INSERT statement i.e., write a row with pk
-   *             that doesn't exist in table)
-   *  2. Update (semantically; not talking about UPDATE statement i.e., write a row with pk
-   *              that already exists in table)
-   *
-   * Both of the above involve writes which can be performed by using either -
-   *      a) INSERT statement.
-   *      b) UPDATE statement.
-   *
-   * So each test case with n writes is internally executed 2^n times with different combinations
-   * of INSERT/UPDATE statements.
-   *
-   * @param predicate
-   * @param indexed_cols the columns which are to be indexed.
-   * @param covering_cols the columns to be covered.
-   * @param strongConsistency
-   * @param is_unique test on a unique index
+   * @param where_clause WHERE clause to test.
+   * @param selected_cols expressions to be selected in SELECT statement.
+   * @param predicate_1 predicate of 1st index.
+   * @param indexed_hash_cols_1 hash index cols of 1st index.
+   * @param indexed_range_cols_1 range index cols of 1st index.
+   * @param covering_cols_1 covering cols of 1st index.
+   * @param add_extra_index true if testcase requires creation of a 2nd index.
+   * @param predicate_2
+   * @param indexed_hash_cols_2
+   * @param indexed_range_cols_2
+   * @param covering_cols_2
+   * @param strongConsistency type of consistency for index.
+   * @param expected_access_method access method expected in query plan.
+   * @param expected_key_conditions key conditions expected in query plan.
+   * @param expected_filter_conditions filter conditions expected in query plan.
+   * @param rows_to_insert list of rows to insert before testing for SELECT statement.
    */
-  public void testPartialIndexSelectsInternal(
-      String predicate, List<String> indexed_cols, List<String> covering_cols,
-      boolean strongConsistency, boolean is_unique) throws Exception {
-    String include_clause = "";
-    if (covering_cols.size() > 0) {
-      include_clause = String.format("INCLUDE (%s)", covering_cols);
+  public void testPartialIndexSelectInternal(String where_clause, List<String> select_cols,
+      String predicate_1, List<String> indexed_hash_cols_1, List<String> indexed_range_cols_1,
+      List<String> covering_cols_1, boolean add_extra_index, String predicate_2,
+      List<String> indexed_hash_cols_2, List<String> indexed_range_cols_2,
+      List<String> covering_cols_2, boolean strongConsistency, String expected_access_method,
+      String expected_key_conditions, String expected_filter_conditions,
+      List<String> rows_to_insert) throws Exception {
+    String include_clause_1 = "";
+    if (covering_cols_1.size() > 0) {
+      include_clause_1 = String.format("INCLUDE (%s)", String.join(", ", covering_cols_1));
     }
 
-    List<String> cols_in_index = new ArrayList<String>();
-    cols_in_index.addAll(indexed_cols);
-    cols_in_index.remove(covering_cols); // Remove duplicates.
-    cols_in_index.addAll(covering_cols);
-    cols_in_index.remove(getPk(this.col_names)); // Remove duplicates.
-    cols_in_index.addAll(getPk(this.col_names));
-
-    // Create index.
+    String index_cols_str = "("+String.join(", ", indexed_hash_cols_1)+")";
+    if (indexed_range_cols_1.size() > 0)
+      index_cols_str += String.join(", ", indexed_range_cols_1);
     createIndex(
-      String.format("CREATE %s INDEX idx ON %s(%s) %s WHERE %s",
-        is_unique ? "UNIQUE" : "", test_table_name, String.join(", ", indexed_cols),
-        include_clause, predicate),
+      String.format("CREATE INDEX idx ON %s(%s) %s WHERE %s",
+        test_table_name, index_cols_str,
+        include_clause_1, predicate_1),
       strongConsistency);
 
-    // Test where partial index is chosen over main table.
+    if (add_extra_index) {
+      String include_clause_2 = "";
+      if (covering_cols_2.size() > 0) {
+        include_clause_2 = String.format("INCLUDE (%s)", String.join(", ", covering_cols_2));
+      }
 
-    // Test where partial index is can't be chosen (WHERE clause doesn't imply predicate).
+      index_cols_str = "("+String.join(", ", indexed_hash_cols_2)+")";
+      if (indexed_range_cols_2.size() > 0)
+        index_cols_str += String.join(", ", indexed_range_cols_2);
+      String predicate_2_str = "";
+      if (!predicate_2.isEmpty()) predicate_2_str = "WHERE " + predicate_2;
+      createIndex(
+        String.format("CREATE INDEX idx2 ON %s(%s) %s %s",
+          test_table_name, index_cols_str,
+          include_clause_2, predicate_2_str),
+        strongConsistency);
+    }
 
-    // Test where two partial indexes of different predicate length are implied by WHERE clause.
-    // We have to choose index which has more number of column operator expressions matching with
-    // WHERE clause.
+    // TODO(Piyush): Move row insertions before index creation to also simultaneously
+    // test index backfill path.
+    for (int i=0; i<rows_to_insert.size(); i++)
+      session.execute(
+        String.format("INSERT INTO %s(%s) values (%s)", test_table_name,
+          String.join(", ", col_names), rows_to_insert.get(i)));
+
+    String query = String.format("select %s from %s where %s",
+      String.join(",", select_cols), test_table_name, where_clause);
+
+    assertTrue(doesQueryPlanContainSubstring(query, expected_access_method));
+
+    if (!expected_key_conditions.isEmpty())
+      assertTrue(
+        doesQueryPlanContainSubstring(query, expected_key_conditions));
+    if (!expected_filter_conditions.isEmpty())
+      assertTrue(
+        doesQueryPlanContainSubstring(query, expected_filter_conditions));
+
+    Set<String> query_output_with_indexes = queryOutputToStringSet(query);
+    session.execute("drop index idx");
+    if (add_extra_index)
+      session.execute("drop index idx2");
+
+    // Query output with expected access method should match that of the main table scan/lookup.
+    assertTrue(queryOutputToStringSet(query).equals(query_output_with_indexes));
+
+    resetTableAndIndex();
   }
 
   public void testPartialIndexDeletesInternal() throws Exception {
 
   }
 
-  public void testPartialIndexWrites(boolean strongConsistency, boolean is_unique) throws Exception {
-    // Pred: regular column v1=NULL | Indexed cols: [v1] | Covering cols: []
+  @Test
+  public void testPartialIndexSelectionPolicy() throws Exception {
     createTable(
       String.format("create table %s " +
-        "(h1 int, h2 int, r1 int, r2 int, v1 int, " +
+        "(h1 int, h2 int, r1 int, r2 int, v1 int, v2 int, " +
+        "primary key ((h1, h2), r1, r2))", test_table_name),
+      true /* strongConsistency */);
+
+    this.pk_col_cnt = 4;
+    this.col_cnt = 6;
+    this.col_names = Arrays.asList("h1", "h2", "r1", "r2", "v1", "v2"); // pk cols first, followed by others
+
+    this.pred_true_rows = Arrays.asList(
+      Arrays.asList("1", "1", "1", "1", "NULL", "5"),
+      Arrays.asList("1", "1", "1", "2", "NULL", "6")
+    );
+    this.pred_false_rows = Arrays.asList(
+      Arrays.asList("1", "1", "1", "1", "10", "7"),
+      Arrays.asList("1", "1", "1", "1", "11", "8"),
+      Arrays.asList("1", "1", "1", "2", "10", "9")
+    );
+    this.already_inserted_true_rows = new ArrayList<Integer>();
+    this.already_inserted_false_rows = new ArrayList<Integer>();
+
+    // Test SELECT statements
+    // ----------------------
+
+    // Test between partial index and main table -
+    // -------------------------------------------
+    //
+    //    1. Test case where WHERE clause doesn't imply partial index. Then the index will never be
+    //    chosen no matter what good properties it has - such as it being covering and not requiring
+    //    a full scan.
+    //
+    //    2. Testing cases where WHERE clause => Partial index
+    //
+    //      4 options for type of (main table scan, index table scan) -
+    //        - (full, full scan): Choose partial index
+    //        - (full, non-full scan): Choose partial index. Trivial case not tested.
+    //        - (non-full, non-full scan): Choose partial index.
+    //        - (non-full, full scan): Choose main table.
+
+    // 1. Main table scan: full scan
+    // 2. Partial Index: WHERE clause doesnt'y Idx predicate && requires non-full scan &&
+    //    covering idx
+    // [Main table is chosen]
+    testPartialIndexSelectInternal(
+      "v1 = 1 and r1 = 1", /* where_clause */
+      Arrays.asList("h1", "h2", "r1", "r2", "v1", "v2"), /* select_cols */
+      "v2 = NULL", /* predicate_1 */
+      Arrays.asList("v1", "r1"), /* indexed_hash_cols_1 */
+      Arrays.asList(), /* indexed_range_cols_1 */
+      Arrays.asList("v2"), /* covering_cols_1 */
+      false,  /* add_extra_index */
+      "", /* predicate_2 */
+      Arrays.asList(), /* indexed_hash_cols_2 */
+      Arrays.asList(), /* indexed_range_cols_2 */
+      Arrays.asList(), /* covering_cols_2 */
+      true, /* strongConsistency */
+      String.format("Seq Scan on %s.%s", DEFAULT_TEST_KEYSPACE, test_table_name), /* expected_access_method */
+      "", /* expected_key_conditions */
+      "Filter: (v1 = 1) AND (r1 = 1)" /* expected_filter_conditions */,
+      Arrays.asList("1, 1, 1, 1, 1, 1", "1, 1, 1, 1, 2, 1") /* rows_to_insert */);
+
+    // 1. Main table scan: full scan
+    // 2. Partial Index: WHERE clause => Idx predicate && full scan
+    // [Partial Index is chosen]
+    testPartialIndexSelectInternal(
+      "h1 = 1 and v1 = NULL", /* where_clause */
+      Arrays.asList("h1", "h2", "r1", "r2", "v1", "v2"), /* select_cols */
+      "v1 = NULL", /* predicate_1 */
+      Arrays.asList("v1", "r1"), /* indexed_hash_cols_1 */
+      Arrays.asList(), /* indexed_range_cols_1 */
+      Arrays.asList(), /* covering_cols_1 */
+      false,  /* add_extra_index */
+      "", /* predicate_2 */
+      Arrays.asList(), /* indexed_hash_cols_2 */
+      Arrays.asList(), /* indexed_range_cols_2 */
+      Arrays.asList(), /* covering_cols_2 */
+      true, /* strongConsistency */
+      String.format("Index Scan using %s.idx", DEFAULT_TEST_KEYSPACE), /* expected_access_method */
+      "", /* expected_key_conditions */
+      "Filter: (v1 = NULL) AND (h1 = 1)", /* expected_filter_conditions */
+      Arrays.asList( /* rows_to_insert */
+        "1, 1, 1, 1, NULL, 1", // pred=true row and where clause satisfied
+        "2, 1, 1, 1, NULL, 1", // pred=true row but where clause not satisfied
+        "2, 2, 1, 1, 1, 1" // pred=false
+      )
+    );
+
+    // 1. Main table scan: Non-full scan
+    // 2. Partial Index: WHERE clause => Idx predicate && non-full scan
+    //    && WHERE clause col ops len > predicate len.
+    // [Partial Index is chosen]
+    testPartialIndexSelectInternal(
+      "v1 = NULL and r1 = 1 and h1 = 1 and h2 = 1", /* where_clause */
+      Arrays.asList("h1", "h2", "r1", "r2", "v1", "v2"), /* select_cols */
+      "v1 = NULL", /* predicate_1 */
+      Arrays.asList("v1", "r1"), /* indexed_hash_cols_1 */
+      Arrays.asList(), /* indexed_range_cols_1 */
+      Arrays.asList(), /* covering_cols_1 */
+      false,  /* add_extra_index */
+      "", /* predicate_2 */
+      Arrays.asList(), /* indexed_hash_cols_2 */
+      Arrays.asList(), /* indexed_range_cols_2 */
+      Arrays.asList(), /* covering_cols_2 */
+      true, /* strongConsistency */
+      String.format("Index Scan using %s.idx", DEFAULT_TEST_KEYSPACE), /* expected_access_method */
+      "Key Conditions: (v1 = NULL) AND (r1 = 1)", /* expected_key_conditions */
+      "Filter: (h1 = 1) AND (h2 = 1)", /* expected_filter_conditions */
+      Arrays.asList( /* rows_to_insert */
+        "1, 1, 1, 1, NULL, 1", // pred=true row and where clause satisfied
+        "2, 1, 1, 1, NULL, 1", // pred=true row but where clause not satisfied
+        "2, 2, 1, 1, 1, 1" // pred=false
+      )
+    );
+
+    // 1. Main table scan: Non-full scan
+    // 2. Partial Index: WHERE clause => Idx predicate && full scan
+    // [Main table is chosen]
+    testPartialIndexSelectInternal(
+      "h1 = 1 and h2 = 1 and v1 = NULL", /* where_clause */
+      Arrays.asList("h1", "h2", "r1", "r2", "v1", "v2"), /* select_cols */
+      "v1 = NULL", /* predicate_1 */
+      Arrays.asList("v1", "r1"), /* indexed_hash_cols_1 */
+      Arrays.asList(), /* indexed_range_cols_1 */
+      Arrays.asList(), /* covering_cols_1 */
+      false,  /* add_extra_index */
+      "", /* predicate_2 */
+      Arrays.asList(), /* indexed_hash_cols_1 */
+      Arrays.asList(), /* indexed_range_cols_1 */
+      Arrays.asList(), /* covering_cols_2 */
+      true, /* strongConsistency */
+      String.format("Range Scan on %s.%s", DEFAULT_TEST_KEYSPACE, test_table_name), /* expected_access_method */
+      "Key Conditions: (h1 = 1) AND (h2 = 1)", /* expected_key_conditions */
+      "Filter: (v1 = NULL)", /* expected_filter_conditions */
+      Arrays.asList( /* rows_to_insert */
+        "1, 1, 1, 1, NULL, 1", // where clause satisfied
+        "2, 1, 1, 1, NULL, 1", // where clause not satisfied
+        "2, 2, 1, 1, 1, 1" // where clause not satisfied
+      )
+    );
+
+    // Test between 2 partial indexes -
+    // --------------------------------
+    //  Consider only cases where both indexes satisfy WHERE clause => idx predicate condition.
+    //  If an index doesn't satisfy, it is not even considered, this is already tested above.
+    //
+    //    If both indexes require full scans, test 2 cases -
+    //      - One which has longer predicate len wins
+    //      - If they have same predicate len, they follow non-partial index
+    //        policies (not testing here).
+    //
+    //    If both indexes require non-full scans, test 2 cases -
+    //      - One which has longer predicate len wins
+    //      - If they have same predicate len, they follow non-partial index
+    //        policies (not testing here).
+    //
+    //    If one index requires full scan and another requires non-full scan choose
+    //    the one with non-full scan always. Test this case only -
+    //      - Idx1 has a longer predicate, but Idx1 requires full scan and
+    //        Idx2 doesn't require full scan.
+
+    // 1. Partial Index 1: WHERE clause => Idx predicate && full scan
+    // 2. Partial Index 2: WHERE clause => Idx predicate && full scan
+    //     Idx2 has longer predicate.
+    // 3. Main table: Full scan
+    // [Idx2 is chosen]
+    testPartialIndexSelectInternal(
+      "h1 = 1 and v1 = NULL", /* where_clause */
+      Arrays.asList("h1", "h2", "r1", "r2", "v1", "v2"), /* select_cols */
+      "v1 = NULL", /* predicate_1 */
+      Arrays.asList("v1", "r1"), /* indexed_hash_cols_1 */
+      Arrays.asList(), /* indexed_range_cols_1 */
+      Arrays.asList("v2"), /* covering_cols_1 */
+      true,  /* add_extra_index */
+      "v1 = NULL and h1 = 1", /* predicate_2 */
+      Arrays.asList("v1", "r1"), /* indexed_hash_cols_1 */
+      Arrays.asList(), /* indexed_range_cols_1 */
+      Arrays.asList(), /* covering_cols_2 */
+      true, /* strongConsistency */
+      String.format("Index Scan using %s.idx2", DEFAULT_TEST_KEYSPACE), /* expected_access_method */
+      "", /* expected_key_conditions */
+      "Filter: (v1 = NULL) AND (h1 = 1)", /* expected_filter_conditions */
+      Arrays.asList( /* rows_to_insert */
+        "1, 1, 1, 1, NULL, 1", // Idx2 pred=true row and where clause satisfied
+        "2, 1, 1, 1, NULL, 1" // Idx2 pred=false row
+      )
+    );
+
+    // 1. Partial Index 1: WHERE clause => Idx predicate && non-full scan
+    // 2. Partial Index 2: WHERE clause => Idx predicate && non-full scan
+    //     Idx2 has longer predicate.
+    // 3. Main table: Full scan
+    // [Idx2 is chosen]
+    testPartialIndexSelectInternal(
+      "r1 = 1 and v1 = NULL", /* where_clause */
+      Arrays.asList("h1", "h2", "r1", "r2", "v1", "v2"), /* select_cols */
+      "v1 = NULL", /* predicate_1 */
+      Arrays.asList("v1", "r1"), /* indexed_hash_cols_1 */
+      Arrays.asList(), /* indexed_range_cols_1 */
+      Arrays.asList("v2"), /* covering_cols_1 */
+      true,  /* add_extra_index */
+      "v1 = NULL and r1 = 1", /* predicate_2 */
+      Arrays.asList("v1", "r1"), /* indexed_hash_cols_1 */
+      Arrays.asList(), /* indexed_range_cols_1 */
+      Arrays.asList(), /* covering_cols_2 */
+      true, /* strongConsistency */
+      String.format("Index Scan using %s.idx2", DEFAULT_TEST_KEYSPACE), /* expected_access_method */
+      "Key Conditions: (v1 = NULL) AND (r1 = 1)", /* expected_key_conditions */
+      "", /* expected_filter_conditions */
+      Arrays.asList( /* rows_to_insert */
+        "1, 1, 1, 1, NULL, 1", // Idx2 pred=true row and where clause satisfied
+        "2, 1, 1, 1, NULL, 1" // Idx2 pred=false row
+      )
+    );
+
+    // 1. Partial Index 1: WHERE clause => Idx predicate && full scan
+    // 2. Partial Index 2: WHERE clause => Idx predicate && non-full scan
+    //     Idx1 has longer predicate.
+    // 3. Main table: Full scan
+    // [Idx2 is chosen]
+    testPartialIndexSelectInternal(
+      "r2 = 2 and v1 = NULL", /* where_clause */
+      Arrays.asList("h1", "h2", "r1", "r2", "v1", "v2"), /* select_cols */
+      "r2 = 2 and v1 = NULL", /* predicate_1 */
+      Arrays.asList("v1", "r1"), /* indexed_hash_cols_1 */
+      Arrays.asList(), /* indexed_range_cols_1 */
+      Arrays.asList("v2"), /* covering_cols_1 */
+      true,  /* add_extra_index */
+      "v1 = NULL", /* predicate_2 */
+      Arrays.asList("v1", "r2"), /* indexed_hash_cols_1 */
+      Arrays.asList(), /* indexed_range_cols_1 */
+      Arrays.asList(), /* covering_cols_2 */
+      true, /* strongConsistency */
+      String.format("Index Scan using %s.idx2", DEFAULT_TEST_KEYSPACE), /* expected_access_method */
+      "Key Conditions: (v1 = NULL) AND (r2 = 2)", /* expected_key_conditions */
+      "", /* expected_filter_conditions */
+      Arrays.asList( /* rows_to_insert */
+        "1, 1, 1, 2, NULL, 1", // Idx2 pred=true row and where clause satisfied
+        "2, 1, 1, 1, NULL, 1", // Idx2 pred=true row but where clause not satisfied
+        "3, 1, 1, 1, NULL, 1" // Idx2 pred=false row
+      )
+    );
+  }
+
+  public void testPartialIndex(boolean strongConsistency, boolean is_unique) throws Exception {
+    // Predicate: regular column v1=NULL | Indexed cols: [v1] | Covering cols: []
+    createTable(
+      String.format("create table %s " +
+        "(h1 int, h2 int, r1 int, r2 int, v1 int, v2 int, " +
         "primary key ((h1, h2), r1, r2))", test_table_name),
       strongConsistency);
 
     this.pk_col_cnt = 4;
-    this.col_cnt = 5;
-    this.col_names = Arrays.asList("h1", "h2", "r1", "r2", "v1"); // pk cols first, followed by others
+    this.col_cnt = 6;
+    this.col_names = Arrays.asList("h1", "h2", "r1", "r2", "v1", "v2"); // pk cols first, followed by others
 
     this.same_pk_i_c_both_pred_true_false_rows = false;
     this.same_pk_c_diff_i_both_pred_true_false_rows = true;
@@ -994,34 +1293,58 @@ public class TestPartialIndex extends TestIndex {
     this.same_i_diff_pk_both_pred_true_false_rows = false;
 
     this.pred_true_rows = Arrays.asList(
-      Arrays.asList("1", "1", "1", "1", "NULL"),
-      Arrays.asList("1", "1", "1", "2", "NULL")
+      Arrays.asList("1", "1", "1", "1", "NULL", "5"),
+      Arrays.asList("1", "1", "1", "2", "NULL", "6")
     );
     this.pred_false_rows = Arrays.asList(
-      Arrays.asList("1", "1", "1", "1", "10"),
-      Arrays.asList("1", "1", "1", "1", "11"),
-      Arrays.asList("1", "1", "1", "2", "10")
+      Arrays.asList("1", "1", "1", "1", "10", "7"),
+      Arrays.asList("1", "1", "1", "1", "11", "8"),
+      Arrays.asList("1", "1", "1", "2", "10", "9")
     );
     this.already_inserted_true_rows = new ArrayList<Integer>();
     this.already_inserted_false_rows = new ArrayList<Integer>();
 
     testPartialIndexWritesInternal(
-      "v1=NULL", /* predicate */
+      "v1 = NULL", /* predicate */
       Arrays.asList("v1"), /* indexed_cols */
       Arrays.asList(), /* covering_cols */
       strongConsistency,
       is_unique);
 
-    testPartialIndexSelectsInternal(
-      "v1=NULL", /* predicate */
-      Arrays.asList("v1"), /* indexed_cols */
-      Arrays.asList(), /* covering_cols */
-      strongConsistency,
-      is_unique);
+    // Basic happy path test for selectivity of partial index with this specific predicate. This is
+    // separate from the tests in testPartialIndexSelectionPolicy which tests all selectivity paths
+    // using a single table and some predicates.
+    // 1. Main table scan: full scan
+    // 2. Partial Index: WHERE clause => Idx predicate && full scan
+    // [Partial Index is chosen]
+    testPartialIndexSelectInternal(
+      "h1 = 1 and v1 = NULL", /* where_clause */
+      Arrays.asList("h1", "h2", "r1", "r2", "v1", "v2"), /* select_cols */
+      "v1 = NULL", /* predicate_1 */
+      Arrays.asList("v1", "r1"), /* indexed_hash_cols_1 */
+      Arrays.asList(), /* indexed_range_cols_1 */
+      Arrays.asList(), /* covering_cols_1 */
+      false,  /* add_extra_index */
+      "", /* predicate_2 */
+      Arrays.asList(), /* indexed_hash_cols_2 */
+      Arrays.asList(), /* indexed_range_cols_2 */
+      Arrays.asList(), /* covering_cols_2 */
+      true, /* strongConsistency */
+      String.format("Index Scan using %s.idx", DEFAULT_TEST_KEYSPACE), /* expected_access_method */
+      "", /* expected_key_conditions */
+      "Filter: (v1 = NULL) AND (h1 = 1)", /* expected_filter_conditions */
+      Arrays.asList( /* rows_to_insert */
+        "1, 1, 1, 1, NULL, 1", // pred=true row and where clause satisfied
+        "2, 1, 1, 1, NULL, 1", // pred=true row but where clause not satisfied
+        "2, 2, 1, 1, 1, 1" // pred=false
+      )
+    );
 
     session.execute(String.format("drop table %s", test_table_name));
 
-    // Pred: multi col NULL v1=NULL and v2=NULL | Indexed cols: [v1] | Covering cols: []
+    // ---------------------------------------------------------------------------------------------
+
+    // Predicate: multi col NULL v1=NULL and v2=NULL | Indexed cols: [v1] | Covering cols: []
     // createTable(
     //   String.format("create table %s " +
     //     "(h1 int, h2 int, r1 int, r2 int, v1 int, v2 int, " +
@@ -1061,7 +1384,9 @@ public class TestPartialIndex extends TestIndex {
 
     // session.execute(String.format("drop table %s", test_table_name));
 
-    // Pred: regular column v1>5 | Indexed cols: [v1] | Covering cols: []
+    // ---------------------------------------------------------------------------------------------
+
+    // Predicate: regular column v1>5 | Indexed cols: [v1] | Covering cols: []
     createTable(
       String.format("create table %s " +
         "(h1 int, h2 int, r1 int, r2 int, v1 int, " +
@@ -1105,25 +1430,52 @@ public class TestPartialIndex extends TestIndex {
       Arrays.asList(), /* covering_cols */
       strongConsistency,
       is_unique /* is_unique */);
+
+    // 1. Main table scan: full scan
+    // 2. Partial Index: WHERE clause => Idx predicate && full scan
+    // [Partial Index is chosen]
+    // TODO(Piyush): Uncomment this after Neil's fix to split where clause semantic analysis.
+    // testPartialIndexSelectInternal(
+    //   "h1 = 1 and v1 > 5", /* where_clause */
+    //   Arrays.asList("h1", "h2", "r1", "r2", "v1"), /* select_cols */
+    //   "v1 > 5", /* predicate_1 */
+    //   Arrays.asList("v1", "r1"), /* indexed_hash_cols_1 */
+    //   Arrays.asList(), /* indexed_range_cols_1 */
+    //   Arrays.asList(), /* covering_cols_1 */
+    //   false,  /* add_extra_index */
+    //   "", /* predicate_2 */
+    //   Arrays.asList(), /* indexed_hash_cols_2 */
+    //   Arrays.asList(), /* indexed_range_cols_2 */
+    //   Arrays.asList(), /* covering_cols_2 */
+    //   true, /* strongConsistency */
+    //   String.format("Index Scan using %s.idx", DEFAULT_TEST_KEYSPACE), /* expected_access_method */
+    //   "", /* expected_key_conditions */
+    //   "Filter: (v1 > 5) AND (h1 = 1)", /* expected_filter_conditions */
+    //   Arrays.asList( /* rows_to_insert */
+    //     "1, 1, 1, 1, 6", // pred=true row and where clause satisfied
+    //     "2, 1, 1, 1, 7", // pred=true row but where clause not satisfied
+    //     "2, 2, 1, 1, 1" // pred=false
+    //   )
+    // );
   }
 
   @Test
-  public void testPartialIndexWrites() throws Exception {
-    testPartialIndexWrites(true /* strongConsistency */, false /* is_unique */);
+  public void testPartialIndex() throws Exception {
+    testPartialIndex(true /* strongConsistency */, false /* is_unique */);
   }
 
   @Test
-  public void testWeakPartialIndexWrites() throws Exception {
-    testPartialIndexWrites(false /* strongConsistency */, false /* is_unique */);
+  public void testWeakPartialIndex() throws Exception {
+    testPartialIndex(false /* strongConsistency */, false /* is_unique */);
   }
 
   @Test
-  public void testUniquePartialIndexWrites() throws Exception {
-    testPartialIndexWrites(true /* strongConsistency */, true /* is_unique */);
+  public void testUniquePartialIndex() throws Exception {
+    testPartialIndex(true /* strongConsistency */, true /* is_unique */);
   }
 
   @Test
-  public void testWeakUniquePartialIndexWrites() throws Exception {
-    testPartialIndexWrites(false /* strongConsistency */, true /* is_unique */);
+  public void testWeakUniquePartialIndex() throws Exception {
+    testPartialIndex(false /* strongConsistency */, true /* is_unique */);
   }
 }
