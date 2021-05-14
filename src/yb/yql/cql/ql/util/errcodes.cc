@@ -92,6 +92,8 @@ const std::unordered_map<ErrorCode, const char*, EnumHash> kQLErrorMessage {
   { ErrorCode::INCOMPATIBLE_COPARTITION_SCHEMA, "Incompatible Copartition Schema" },
   { ErrorCode::INVALID_ROLE_DEFINITION, "Invalid Role Definition" },
   { ErrorCode::DUPLICATE_ROLE, "Duplicate Role"},
+  { ErrorCode::INVALID_UPDATE_PROPERTY, "Invalid Update Property" },
+  { ErrorCode::DUPLICATE_UPDATE_PROPERTY, "Duplicate Update Property" },
 
   //------------------------------------------------------------------------------------------------
   // Execution errors [-300, x).

@@ -520,6 +520,10 @@ public class BaseCQLTest extends BaseMiniClusterTest {
   }
 
   protected void runInvalidStmt(String stmt, String errorSubstring) {
+    runInvalidStmt(new SimpleStatement(stmt), errorSubstring);
+  }
+
+  protected void runInvalidStmt(Statement stmt, String errorSubstring) {
     String errorMsg = runInvalidStmt(stmt);
     assertTrue("Error message '" + errorMsg + "' should contain '" + errorSubstring + "'",
                errorMsg.contains(errorSubstring));
