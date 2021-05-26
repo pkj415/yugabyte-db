@@ -82,12 +82,15 @@ Result<PgApiImpl::MessengerHolder> BuildMessenger(
     const string& client_name,
     int32_t num_reactors,
     const scoped_refptr<MetricEntity>& metric_entity,
-    const std::shared_ptr<MemTracker>& parent_mem_tracker) {
+    const std::shared_ptr<MemTracker>& parent_mem_tracker,
+    const char* cert_base_name) {
   std::unique_ptr<rpc::SecureContext> secure_context;
   if (FLAGS_use_node_to_node_encryption) {
+    std::string node_name(cert_base_name);
     secure_context = VERIFY_RESULT(server::CreateSecureContext(
         FLAGS_certs_dir,
-        server::UseClientCerts(FLAGS_node_to_node_encryption_use_client_certificates)));
+        server::UseClientCerts(FLAGS_node_to_node_encryption_use_client_certificates),
+        node_name));
   }
   auto messenger = VERIFY_RESULT(client::CreateClientMessenger(
       client_name, num_reactors, metric_entity, parent_mem_tracker, secure_context.get()));
@@ -170,14 +173,16 @@ PggateOptions::PggateOptions() : ServerBaseOptions(kDefaultPort) {
 
 //--------------------------------------------------------------------------------------------------
 
-PgApiImpl::PgApiImpl(const YBCPgTypeEntity *YBCDataTypeArray, int count, YBCPgCallbacks callbacks)
+PgApiImpl::PgApiImpl(const YBCPgTypeEntity *YBCDataTypeArray, int count, YBCPgCallbacks callbacks,
+                     const char* cert_base_name)
     : metric_registry_(new MetricRegistry()),
       metric_entity_(METRIC_ENTITY_server.Instantiate(metric_registry_.get(), "yb.pggate")),
       mem_tracker_(MemTracker::CreateTracker("PostgreSQL")),
       messenger_holder_(CHECK_RESULT(BuildMessenger("pggate_ybclient",
                                                     FLAGS_pggate_ybclient_reactor_threads,
                                                     metric_entity_,
-                                                    mem_tracker_))),
+                                                    mem_tracker_,
+                                                    cert_base_name))),
       async_client_init_(messenger_holder_.messenger.get()->name(),
                          FLAGS_pggate_ybclient_reactor_threads,
                          FLAGS_pggate_rpc_timeout_secs,

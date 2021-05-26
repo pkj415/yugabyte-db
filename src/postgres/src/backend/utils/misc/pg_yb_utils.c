@@ -414,7 +414,7 @@ YBInitPostgresBackend(
 		callbacks.FetchUniqueConstraintName = &FetchUniqueConstraintName;
 		callbacks.GetCurrentYbMemctx = &GetCurrentYbMemctx;
 		callbacks.GetDebugQueryString = &GetDebugQueryString;
-		YBCInitPgGate(type_table, count, callbacks);
+		YBCInitPgGate(type_table, count, callbacks, cert_base_name);
 		YBCInstallTxnDdlHook();
 
 		/*
@@ -780,6 +780,7 @@ PowerWithUpperLimit(double base, int exp, double upper_limit)
 
 bool yb_enable_create_with_table_oid = false;
 int yb_index_state_flags_update_delay = 1000;
+char* cert_base_name = NULL;
 
 //------------------------------------------------------------------------------
 // YB Debug utils.

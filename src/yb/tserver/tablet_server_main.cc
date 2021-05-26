@@ -224,10 +224,12 @@ int TabletServerMain(int argc, char** argv) {
         : FLAGS_certs_for_client_dir;
     pg_process_conf.enable_tls = FLAGS_use_client_to_server_encryption;
 
+    LOG(INFO) << "Piyush - here1 pg_process_conf.enable_tls=" << FLAGS_use_client_to_server_encryption;
     // Follow the same logic as elsewhere, check FLAGS_cert_node_filename then
     // server_broadcast_addresses then rpc_bind_addresses.
     if (!FLAGS_cert_node_filename.empty()) {
       pg_process_conf.cert_base_name = FLAGS_cert_node_filename;
+      LOG(INFO) << "Piyush - here2";
     } else {
       const auto server_broadcast_addresses =
           HostPort::ParseStrings(server->options().server_broadcast_addresses, 0);
@@ -238,6 +240,7 @@ int TabletServerMain(int argc, char** argv) {
       pg_process_conf.cert_base_name = !server_broadcast_addresses->empty()
                                      ? server_broadcast_addresses->front().host()
                                      : rpc_bind_addresses->front().host();
+      LOG(INFO) << "Piyush - here3";
     }
     LOG(INFO) << "Starting PostgreSQL server listening on "
               << pg_process_conf.listen_addresses << ", port " << pg_process_conf.pg_port;

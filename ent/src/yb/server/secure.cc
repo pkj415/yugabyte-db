@@ -92,6 +92,9 @@ Result<std::unique_ptr<rpc::SecureContext>> SetupSecureContext(
     SecureContextType type, rpc::MessengerBuilder* builder) {
   auto use = type == SecureContextType::kInternal ? FLAGS_use_node_to_node_encryption
                                                   : FLAGS_use_client_to_server_encryption;
+  LOG(INFO) << "Piyush - SetupSecureContext cert_dir, root_dir, name, type=" <<
+    cert_dir << ", " << root_dir << ", " << name << ", " << type;
+
   if (!use) {
     return std::unique_ptr<rpc::SecureContext>();
   }
@@ -124,7 +127,8 @@ Result<std::unique_ptr<rpc::SecureContext>> CreateSecureContext(
     const std::string& certs_dir, UseClientCerts use_client_certs, const std::string& node_name,
     const std::string& required_uid) {
 
-  LOG(INFO) << "Certs directory: " << certs_dir << ", node name: " << node_name;
+  LOG(INFO) << "Piyush Certs directory: " << certs_dir << ", node name: " << node_name
+    << ", use_client_certs: " << use_client_certs << ", required_uid: " << required_uid;
 
   auto result = std::make_unique<rpc::SecureContext>();
   faststring data;

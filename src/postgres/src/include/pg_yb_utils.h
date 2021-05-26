@@ -336,6 +336,8 @@ extern bool yb_enable_create_with_table_oid;
  */
 extern int yb_index_state_flags_update_delay;
 
+extern char* cert_base_name;
+
 //------------------------------------------------------------------------------
 // YB Debug utils.
 

@@ -77,7 +77,8 @@ YBCStatus ProcessYbctid(
 //--------------------------------------------------------------------------------------------------
 extern "C" {
 
-void YBCInitPgGate(const YBCPgTypeEntity *YBCDataTypeTable, int count, PgCallbacks pg_callbacks) {
+void YBCInitPgGate(const YBCPgTypeEntity *YBCDataTypeTable, int count, PgCallbacks pg_callbacks,
+                   const char* cert_base_name) {
   InitThreading();
 
   CHECK(pgapi == nullptr) << ": " << __PRETTY_FUNCTION__ << " can only be called once";
@@ -89,7 +90,7 @@ void YBCInitPgGate(const YBCPgTypeEntity *YBCDataTypeTable, int count, PgCallbac
 #endif
 
   pgapi_shutdown_done.exchange(false);
-  pgapi = new pggate::PgApiImpl(YBCDataTypeTable, count, pg_callbacks);
+  pgapi = new pggate::PgApiImpl(YBCDataTypeTable, count, pg_callbacks, cert_base_name);
   VLOG(1) << "PgGate open";
 }
 

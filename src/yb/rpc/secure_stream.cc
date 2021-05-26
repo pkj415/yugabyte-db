@@ -831,7 +831,7 @@ Status SecureStream::Init() {
     bio_.reset(temp_bio);
 
     int verify_mode = SSL_VERIFY_PEER;
-    if (secure_context_.require_client_certificate()) {
+    if (secure_context_.require_client_certificate()) { // TODO(Piyush): Only if this is server?
       verify_mode |= SSL_VERIFY_FAIL_IF_NO_PEER_CERT | SSL_VERIFY_CLIENT_ONCE;
     }
     SSL_set_verify(ssl_.get(), verify_mode, &VerifyCallback);

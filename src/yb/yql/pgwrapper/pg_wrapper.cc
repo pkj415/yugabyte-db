@@ -181,6 +181,8 @@ Result<string> WritePostgresConfig(const PgProcessConf& conf) {
     ReadCommaSeparatedValues(FLAGS_ysql_pg_conf, &lines);
   }
 
+  lines.push_back(Format("cert_base_name='$0'", conf.cert_base_name));
+
   if (conf.enable_tls) {
     lines.push_back("ssl=on");
     lines.push_back(Format("ssl_cert_file='$0/node.$1.crt'",

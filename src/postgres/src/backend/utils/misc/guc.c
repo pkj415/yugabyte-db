@@ -3949,6 +3949,17 @@ static struct config_string ConfigureNamesString[] =
 	},
 
 	{
+		{"cert_base_name", PGC_SIGHUP, CONN_AUTH_SSL,
+			gettext_noop(""),
+			NULL,
+			GUC_SUPERUSER_ONLY
+		},
+		&cert_base_name,
+		"",
+		NULL, NULL, NULL
+	},
+
+	{
 		{"ssl_cert_file", PGC_SIGHUP, CONN_AUTH_SSL,
 			gettext_noop("Location of the SSL server certificate file."),
 			NULL
