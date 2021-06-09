@@ -533,10 +533,13 @@ public class TestIndex extends BaseCQLTest {
     assertIndexUpdate(tableColumnMap, indexColumnMap,
       "update test_update set v2=null where h1=1 and r1=2");
 
+    session.execute("drop table test_update");
+
+    // =========================================================================
+
     // Follow-up test case: Apart from actual bug in #7641, we also test below case:
     //   - UPDATE a row without liveness column. Set only null values on regular columns except a
     //     non-null value on a static column. Index entry should get deleted.
-    session.execute("drop table test_update");
     createTable("create table test_update (h1 int, r1 int, s1 int static, v2 int, v3 int, " +
       "primary key(h1, r1)) ", strongConsistency);
     createIndex("create index i1 on test_update (v3)", strongConsistency);
@@ -547,9 +550,24 @@ public class TestIndex extends BaseCQLTest {
 
     // Perform update - index entry should be removed since tuple is removed in main table.
     session.execute("update test_update set s1=4, v2=null where h1=1 and r1=2");
-    // assertQuery("select * from test_update where v3=null", "");
+    assertQuery("select * from test_update where v3=null", "");
     Set<String> index_tuples = queryTable("i1", indexColumnMap.get("i1"));
     assertTrue(index_tuples.size() == 0);
+    session.execute("drop table test_update");
+
+    // =========================================================================
+
+    // Test case for #8834
+    session.execute("CREATE TABLE test_update(h1 uuid PRIMARY KEY, v1 int, v2 int," +
+      " v3 text) WITH default_time_to_live = 0 AND transactions = {'enabled': 'true'};");
+    createIndex("CREATE INDEX v2_idx ON test_update (v2, h1)", strongConsistency);
+
+    assertIndexUpdate(tableColumnMap, indexColumnMap,
+      "update test_update set v3 = 'TotalEnergies SE' where h1 = b031203c-fc93-4a22-94d8-893afa8f772c");
+    assertIndexUpdate(tableColumnMap, indexColumnMap,
+      "update test_update set v3 = 'TotalEnergies SE' where h1 = b031203c-fc93-4a22-94d8-893afa8f772c");
+
+    session.execute("drop table test_update");
   }
 
   @Test

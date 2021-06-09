@@ -1105,11 +1105,7 @@ Result<bool> QLWriteOperation::IsRowDeleted(const QLTableRow& existing_row,
       switch (GetValueState(existing_row, column_id)) {
         case ValueState::kNull: continue;
         case ValueState::kNotNull: return false;
-        case ValueState::kMissing:
-          // In case there exists a row with the same primary key, we definitely need to know if its
-          // columns have value NULL or not. Populate the column before executing this function.
-          RSTATUS_DCHECK(false, InternalError, "CQL proxy should mention all required columns in "
-            "QLWriteRequestPB's column_refs.");
+        case ValueState::kMissing: break;
       }
     }
 
