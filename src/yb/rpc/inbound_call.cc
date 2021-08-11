@@ -61,6 +61,16 @@ DEFINE_bool(rpc_dump_all_traces, false,
 TAG_FLAG(rpc_dump_all_traces, advanced);
 TAG_FLAG(rpc_dump_all_traces, runtime);
 
+DEFINE_bool(rpc_dump_all_inbound_traces_minimal, false,
+            "If true, dump all RPC traces at INFO level with some differences from the "
+            "rpc_dump_all_traces flag - "
+            "1. Only dump inbound calls"
+            "2. Dump the request protobuf too"
+            "3. Exclude GetTransactionStatus, UpdateConsensus with 0 ops, UpdateTransaction with "
+            "PENDING state. These are sent periodically and usually clutter the view.");
+TAG_FLAG(rpc_dump_all_inbound_traces_minimal, advanced);
+TAG_FLAG(rpc_dump_all_inbound_traces_minimal, runtime);
+
 DEFINE_bool(collect_end_to_end_traces, false,
             "If true, collected traces includes information for sub-components "
             "potentially running on a different server. ");

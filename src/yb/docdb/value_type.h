@@ -40,7 +40,7 @@ namespace docdb {
     /* We use ASCII code 13 in order to have it before all other value types which can occur in */ \
     /* key, so intents will be written in the same order as original keys for which intents are */ \
     /* written. */ \
-    ((kIntentTypeSet, 13)) \
+    ((kIntentTypeSet, 13)) /* hex code 0D */ \
     /* Obsolete intent prefix. Should be deleted when DBs in old format are gone. */ \
     /* It has different values to intent type set entries, that was not optimised for RocksDB */ \
     /* lookup. */ \
@@ -57,7 +57,7 @@ namespace docdb {
     /* key. This needs to sort before all other value types, so that a DocKey that has a prefix */ \
     /* of the sequence of components of another key sorts before the other key. kGroupEnd is */ \
     /* also used as the end marker for a frozen value. */ \
-    ((kGroupEnd, '!')) /* ASCII code 33 -- we pick the lowest code graphic character. */ \
+    ((kGroupEnd, '!')) /* ASCII code 33, hex code 21 -- we pick the lowest code graphic character. */ \
     /* HybridTime must be lower than all other primitive types (other than kGroupEnd) so that */ \
     /* SubDocKeys that have fewer subkeys within a document sort above those that have all the */ \
     /* same subkeys and more. In our MVCC document model layout the hybrid time always appears */ \
@@ -92,11 +92,11 @@ namespace docdb {
     ((kDouble, 'D'))  /* ASCII code 68 */ \
     ((kDecimal, 'E'))  /* ASCII code 69 */ \
     ((kFalse, 'F'))  /* ASCII code 70 */ \
-    ((kUInt16Hash, 'G'))  /* ASCII code 71 */ \
-    ((kInt32, 'H'))  /* ASCII code 72 */ \
+    ((kUInt16Hash, 'G'))  /* ASCII code 71, hex code 47 */ \
+    ((kInt32, 'H'))  /* ASCII code 72, hex code 48 */ \
     ((kInt64, 'I'))  /* ASCII code 73 */ \
     ((kSystemColumnId, 'J'))  /* ASCII code 74 */ \
-    ((kColumnId, 'K'))  /* ASCII code 75 */ \
+    ((kColumnId, 'K'))  /* ASCII code 75, hex code 4B */ \
     ((kDoubleDescending, 'L'))  /* ASCII code 76 */ \
     ((kFloatDescending, 'M')) /* ASCII code 77 */ \
     ((kUInt32, 'O'))  /* ASCII code 79 */ \

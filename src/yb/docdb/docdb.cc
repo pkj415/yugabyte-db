@@ -176,6 +176,17 @@ CHECKED_STATUS ApplyIntent(RefCntPrefix key,
 struct DetermineKeysToLockResult {
   LockBatchEntries lock_batch;
   bool need_read_snapshot;
+
+  std::string ToString() const {
+    std::ostringstream lock_batch_str;
+    bool first = true;
+    for (const auto& lock_batch_entry : lock_batch) {
+      lock_batch_str << (first ? "" : ", ");
+      first = false;
+      lock_batch_str << lock_batch_entry;
+    }
+    return Format("{ lock_batch: $0 need_read_snapshot: $1 }", lock_batch_str.str(), need_read_snapshot);
+  }
 };
 
 Result<DetermineKeysToLockResult> DetermineKeysToLock(
@@ -329,6 +340,7 @@ Result<PrepareDocWriteOperationResult> PrepareDocWriteOperation(
   auto determine_keys_to_lock_result = VERIFY_RESULT(DetermineKeysToLock(
       doc_write_ops, read_pairs, isolation_level, operation_kind, row_mark_type,
       transactional_table, partial_range_key_intents));
+  VLOG(4) << "determine_keys_to_lock_result=" << determine_keys_to_lock_result.ToString();
   if (determine_keys_to_lock_result.lock_batch.empty()) {
     LOG(ERROR) << "Empty lock batch, doc_write_ops: " << yb::ToString(doc_write_ops)
                << ", read pairs: " << yb::ToString(read_pairs);
@@ -337,6 +349,7 @@ Result<PrepareDocWriteOperationResult> PrepareDocWriteOperation(
   result.need_read_snapshot = determine_keys_to_lock_result.need_read_snapshot;
 
   FilterKeysToLock(&determine_keys_to_lock_result.lock_batch);
+  VLOG(4) << "filtered determine_keys_to_lock_result=" << determine_keys_to_lock_result.ToString();
   const MonoTime start_time = (write_lock_latency != nullptr) ? MonoTime::Now() : MonoTime();
   result.lock_batch = LockBatch(
       lock_manager, std::move(determine_keys_to_lock_result.lock_batch), deadline);

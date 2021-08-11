@@ -37,6 +37,7 @@
 
 #include <boost/core/null_deleter.hpp>
 
+#include "yb/consensus/consensus.pb.h"
 #include "yb/rpc/connection.h"
 #include "yb/rpc/inbound_call.h"
 #include "yb/rpc/local_call.h"
@@ -44,7 +45,7 @@
 #include "yb/rpc/service_if.h"
 #include "yb/rpc/reactor.h"
 #include "yb/rpc/yb_rpc.h"
-
+#include "yb/tserver/tserver_service.pb.h"
 #include "yb/util/hdr_histogram.h"
 #include "yb/util/metrics.h"
 #include "yb/util/trace.h"
@@ -54,6 +55,7 @@
 
 using google::protobuf::Message;
 DECLARE_int32(rpc_max_message_size);
+DECLARE_bool(rpc_dump_all_inbound_traces_minimal);
 
 namespace yb {
 namespace rpc {
@@ -109,6 +111,38 @@ RpcContext::RpcContext(std::shared_ptr<YBInboundCall> call,
     RespondRpcFailure(ErrorStatusPB::ERROR_INVALID_REQUEST, s);
     return;
   }
+
+  if (PREDICT_FALSE(FLAGS_rpc_dump_all_inbound_traces_minimal)) {
+    std::set<string> methods_to_ignore;
+    methods_to_ignore.insert("yb.tserver.TabletServerService.GetTransactionStatus");
+    bool do_log = \
+      methods_to_ignore.find(call_->remote_method().ToString()) == methods_to_ignore.end();
+
+    if (do_log &&
+        call_->remote_method().ToString() == "yb.consensus.ConsensusService.UpdateConsensus") {
+      auto& temp = static_cast<const consensus::ConsensusRequestPB&>(*request_pb_);
+      do_log = !(temp.ops_size() == 0);
+      if (do_log &&
+          temp.ops(0).op_type() == consensus::OperationType::UPDATE_TRANSACTION_OP &&
+          temp.ops(0).transaction_state().status() == TransactionStatus::PENDING) {
+        do_log = false;
+      }
+    }
+
+    if (do_log &&
+        call_->remote_method().ToString() == "yb.tserver.TabletServerService.UpdateTransaction") {
+      auto& temp = static_cast<const tserver::UpdateTransactionRequestPB&>(*request_pb_);
+      do_log = !(temp.state().status() == TransactionStatus::PENDING);
+    }
+
+    if (do_log) {
+      LOG(INFO) << Format("Inbound RPC call $0 $1 -> $2 req= $3 $4", call_->remote_method(),
+        AsString(call_->remote_address()), AsString(call_->local_address()),
+        request_pb_->GetTypeName(),
+        request_pb_->ShortDebugString());
+    }
+  }
+
   TRACE_EVENT_ASYNC_BEGIN2("rpc_call", "RPC", this,
                            "call", call_->ToString(),
                            "request", TracePb(*request_pb_));

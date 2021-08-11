@@ -59,6 +59,20 @@ void LockBatch::MoveFrom(LockBatch* other) {
   other->data_.key_to_type.clear();
 }
 
+// std::string ToString(const struct LockBatchEntry& entry) {
+//   SubDocKey k;
+//   Slice s = entry.key.as_slice();
+//   DCHECK(k.DecodeFrom(&s, HybridTimeRequired::kFalse).ok());
+//   return Format("{ key: $0 intent_types: $1 }", k.ToString(), entry.intent_types);
+// }
+
+std::ostream& operator<<(std::ostream& out, const struct LockBatchEntry& entry) {
+  // SubDocKey k;
+  // Slice s = entry.key.as_slice();
+  // return out << k.DecodeFrom(&s, HybridTimeRequired::kFalse);
+  // DCHECK(k.DecodeFrom(&s, HybridTimeRequired::kFalse).ok());
+  return out << "{ key: " << entry.key.as_slice().ToDebugHexString() << " intent_types: " << ToString(entry.intent_types) << " }";
+}
 
 }  // namespace docdb
 }  // namespace yb

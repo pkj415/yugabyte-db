@@ -606,7 +606,7 @@ Status PrimitiveValue::DecodeFromKey(rocksdb::Slice* slice) {
   return DecodeKey(slice, this);
 }
 
-Status PrimitiveValue::DecodeKey(rocksdb::Slice* slice, PrimitiveValue* out) {
+Status PrimitiveValue:: DecodeKey(rocksdb::Slice* slice, PrimitiveValue* out) {
   // A copy for error reporting.
   const rocksdb::Slice input_slice(*slice);
 

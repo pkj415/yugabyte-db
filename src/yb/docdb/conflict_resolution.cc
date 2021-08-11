@@ -169,7 +169,9 @@ class ConflictResolver : public std::enable_shared_from_this<ConflictResolver> {
       intent_key_upperbound_.clear();
     });
     Slice prefix_slice(intent_key_prefix->AsSlice().data(), original_size);
-    VLOG_WITH_PREFIX_AND_FUNC(4) << "Seek: " << intent_key_prefix->AsSlice().ToDebugString();
+    VLOG_WITH_PREFIX_AND_FUNC(4) << "Check conflicts in IntentsDB; Seek: "
+      << intent_key_prefix->AsSlice().ToDebugHexString() << " for type "
+      << ToString(type);
     intent_iter_.Seek(intent_key_prefix->AsSlice());
     while (intent_iter_.Valid()) {
       auto existing_key = intent_iter_.key();
@@ -193,10 +195,12 @@ class ConflictResolver : public std::enable_shared_from_this<ConflictResolver> {
             existing_key.ToDebugHexString(),
             existing_value.ToDebugHexString());
       }
-      VLOG_WITH_PREFIX_AND_FUNC(4) << "Found: " << existing_value.ToDebugString();
       existing_value.consume_byte();
       auto existing_intent = VERIFY_RESULT(
           docdb::ParseIntentKey(intent_iter_.key(), existing_value));
+
+      VLOG_WITH_PREFIX_AND_FUNC(4) << "Found: " << existing_value.ToDebugString()
+        << " has intent types " << ToString(existing_intent.types);
       const auto intent_mask = kIntentTypeSetMask[existing_intent.types.ToUIntPtr()];
       if ((conflicting_intent_types & intent_mask) != 0) {
         auto transaction_id = VERIFY_RESULT(FullyDecodeTransactionId(
@@ -480,6 +484,14 @@ struct IntentData {
 
 using IntentTypesContainer = std::map<KeyBuffer, IntentData>;
 
+std::ostream& operator<<(std::ostream& out, const IntentTypesContainer& container) {
+  for(auto it = container.cbegin(); it != container.cend(); ++it) {
+    out << "{ key=" << it->first.AsSlice().ToDebugHexString() << ", types=" << ToString(it->second.types) << ", full_doc_key="
+      << it->second.full_doc_key << " } ";
+  }
+  return out;
+}
+
 class IntentProcessor {
  public:
   IntentProcessor(IntentTypesContainer* container, const IntentTypeSet& strong_intent_types)
@@ -559,8 +571,8 @@ class StrongConflictChecker {
       value_iter_hash_ = hash;
     }
     value_iter_.Seek(intent_key);
-    VLOG_WITH_PREFIX_AND_FUNC(4)
-        << "Seek: " << intent_key.ToDebugString() << ", strong: " << strong;
+    VLOG_WITH_PREFIX_AND_FUNC(4) << "Check conflicts in RocksDB; Seek: "
+      << intent_key.ToDebugString() << ", strong: " << strong;
     // If we are resolving conflicts for writing a strong intent, look at records in regular RocksDB
     // with the same key as the intent's key (not including hybrid time) and any child keys. This is
     // because a strong intent indicates deletion or replacement of the entire subdocument tree and
@@ -742,7 +754,8 @@ class TransactionConflictResolverContext : public ConflictResolverContextBase {
 
       for (const auto& path : paths) {
         VLOG_WITH_PREFIX_AND_FUNC(4)
-            << "Doc path: " << SubDocKey::DebugSliceToString(path.as_slice());
+            << "Doc path: " << SubDocKey::DebugSliceToString(path.as_slice())
+            << " " << path.as_slice().ToDebugHexString();
         RETURN_NOT_OK(EnumerateIntents(
             path.as_slice(),
             /* intent_value */ Slice(),
@@ -772,6 +785,8 @@ class TransactionConflictResolverContext : public ConflictResolverContextBase {
     if (container.empty()) {
       return Status::OK();
     }
+
+    VLOG_WITH_PREFIX_AND_FUNC(4) << "Check txn's conflicts for following: " << container;
 
     StrongConflictChecker checker(
         *transaction_id_, read_time_, resolver, GetConflictsMetric(), &buffer);
@@ -894,7 +909,8 @@ class OperationConflictResolverContext : public ConflictResolverContextBase {
 
       for (const auto& doc_path : doc_paths) {
         VLOG_WITH_PREFIX_AND_FUNC(4)
-            << "Doc path: " << SubDocKey::DebugSliceToString(doc_path.as_slice());
+            << "Doc path: " << SubDocKey::DebugSliceToString(doc_path.as_slice())
+            << " " << doc_path.as_slice().ToDebugHexString();
         RETURN_NOT_OK(EnumerateIntents(
             doc_path.as_slice(), Slice(), callback, &encoded_key_buffer,
             PartialRangeKeyIntents::kTrue));

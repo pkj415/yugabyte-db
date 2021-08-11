@@ -40,10 +40,8 @@ struct LockBatchEntry {
   // Memory is owned by SharedLockManager.
   LockedBatchEntry* locked = nullptr;
 
-  std::string ToString() const {
-    return Format("{ key: $0 intent_types: $1 }", key.as_slice().ToDebugHexString(), intent_types);
-  }
 };
+std::ostream& operator<<(std::ostream& out, const struct LockBatchEntry& entry);
 
 typedef std::vector<LockBatchEntry> LockBatchEntries;
 

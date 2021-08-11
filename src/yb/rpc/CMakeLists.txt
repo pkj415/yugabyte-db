@@ -101,6 +101,8 @@ set(YRPC_LIBS
   rpc_header_proto
   rpc_introspection_proto
   snappy
+  consensus_metadata_proto
+  tserver_proto
   yb_util
   ${OPENSSL_CRYPTO_LIBRARY}
   ${OPENSSL_SSL_LIBRARY})
