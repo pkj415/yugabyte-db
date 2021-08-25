@@ -16,6 +16,7 @@
 #include "yb/yql/cql/cqlserver/cql_processor.h"
 
 #include <ldap.h>
+#include <sasl/sasl.h>
 
 #include "yb/common/ql_value.h"
 
@@ -678,6 +679,40 @@ Result<LDAPHolder> InitializeLDAPConnection(const char *uris) {
   return ldap;
 }
 
+int sasl_interact_cb(LDAP *ld, unsigned flags, void *defaults, void *interact) {
+  std::pair<std::string, std::string> *creds = (std::pair<std::string, std::string>*)defaults;
+  sasl_interact_t *sasl_interact = (sasl_interact_t *)interact;
+  if(ld == NULL) {
+    LOG(ERROR) << "ld was NULL in sasl_interact_cb()";
+    return LDAP_PARAM_ERROR;
+  }
+
+  while(sasl_interact->id != SASL_CB_LIST_END)
+  {
+    switch(sasl_interact->id)
+    {
+      case SASL_CB_GETREALM:
+        sasl_interact->result = NULL;
+        break;
+      case SASL_CB_USER:
+      case SASL_CB_AUTHNAME:
+        sasl_interact->result = creds->first.c_str();
+        break;
+      case SASL_CB_PASS:
+        sasl_interact->result = creds->second.c_str();
+        break;
+      default:
+        LOG(ERROR) << "unhandled sasl interaction found";
+        return LDAP_LOCAL_ERROR;
+    }
+
+    sasl_interact->len = strlen((char *)sasl_interact->result);
+    sasl_interact++;
+  }
+
+  return LDAP_SUCCESS;
+}
+
 Result<bool> CheckLDAPAuth(const ql::AuthResponseRequest::AuthQueryParameters& params) {
   VLOG(4) << "Attempting ldap_initialize() with " << FLAGS_ycql_ldap_server;
   if (FLAGS_ycql_ldap_server.empty())
@@ -718,12 +753,12 @@ Result<bool> CheckLDAPAuth(const ql::AuthResponseRequest::AuthQueryParameters& p
     * Bind with a pre-defined username/password (if available) for
     * searching. If none is specified, this turns into an anonymous bind.
     */
-    struct berval cred;
-    ber_str2bv(FLAGS_ycql_ldap_bind_passwd.c_str(), 0 /* len */, 0 /* duplicate */ , &cred);
-    r = ldap_sasl_bind_s(ldap.get(), FLAGS_ycql_ldap_bind_dn.c_str(),
-                         LDAP_SASL_SIMPLE, &cred,
-                         NULL /* serverctrls */, NULL /* clientctrls */,
-                         NULL /* servercredp */);
+    std::string creds[2] = {FLAGS_ycql_ldap_bind_dn, FLAGS_ycql_ldap_bind_passwd};
+    r = ldap_sasl_interactive_bind_s(ldap.get(), NULL,
+                                     NULL /* sasl mechs */, NULL /* serverctrls */,
+                                     NULL /* clientctrls */, LDAP_SASL_QUIET /* flags */,
+                                     sasl_interact_cb /* interact callback */,
+                                     &creds /* defaults */);
     if (r != LDAP_SUCCESS) {
       return STATUS_FORMAT(
         InvalidArgument,
@@ -793,13 +828,13 @@ Result<bool> CheckLDAPAuth(const ql::AuthResponseRequest::AuthQueryParameters& p
 
   VLOG(4) << "Checking authentication using LDAP for user DN=" << fulluser;
 
-  struct berval cred;
-  ber_str2bv(params.password.c_str(), 0 /* len */, 0 /* duplicate */, &cred);
-  r = ldap_sasl_bind_s(ldap.get(), fulluser.c_str(),
-                       LDAP_SASL_SIMPLE, &cred,
-                       NULL /* serverctrls */, NULL /* clientctrls */,
-                       NULL /* servercredp */);
-  VLOG(4) << "ldap_sasl_bind_s return value =" << r;
+  std::string creds[2] = {fulluser, params.password};
+  r = ldap_sasl_interactive_bind_s(ldap.get(), NULL,
+                                   NULL /* sasl mechs */, NULL /* serverctrls */,
+                                   NULL /* clientctrls */, LDAP_SASL_QUIET /* flags */,
+                                   sasl_interact_cb /* interact callback */,
+                                   &creds /* defaults */);
+  VLOG(4) << "ldap_sasl_interactive_bind_s return value =" << r;
 
   if (r != LDAP_SUCCESS) {
     std::ostringstream str;
