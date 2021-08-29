@@ -361,7 +361,7 @@ void HandleYBStatusAtErrorLevel(YBCStatus status, int error_level) {
 	const uint16_t txn_err_code = YBCStatusTransactionError(status);
 	YBCFreeStatus(status);
 	ereport(error_level,
-			(errmsg("%s", msg_buf),
+			(errmsg("%s txn_err_code=%d", msg_buf, txn_err_code),
 			 errcode(pg_err_code),
 			 yb_txn_errcode(txn_err_code),
 			 errhidecontext(true)));
@@ -1314,6 +1314,10 @@ void YBEndOperationsBuffering() {
 void YBResetOperationsBuffering() {
 	buffering_nesting_level = 0;
 	YBCPgResetOperationsBuffering();
+}
+
+void YBFlushBufferedOperations() {
+	HandleYBStatus(YBCPgFlushBufferedOperations());
 }
 
 bool YBReadFromFollowersEnabled() {
