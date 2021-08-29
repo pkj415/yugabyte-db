@@ -980,16 +980,16 @@ Status PgApiImpl::ProcessYBTupleId(const YBCPgYBTupleIdDescriptor& descr,
   return STATUS_FORMAT(Corruption, "Not all attributes ($0) were resolved", remain_attr);
 }
 
-Status PgApiImpl::StartOperationsBuffering() {
-  return pg_session_->StartOperationsBuffering();
+Status PgApiImpl::FlushBufferedOperations() {
+  return pg_session_->FlushBufferedOperations();
 }
 
-Status PgApiImpl::StopOperationsBuffering() {
-  return pg_session_->StopOperationsBuffering();
+void PgApiImpl::DropBufferedOperations() {
+  pg_session_->DropBufferedOperations();
 }
 
-void PgApiImpl::ResetOperationsBuffering() {
-  pg_session_->ResetOperationsBuffering();
+int PgApiImpl::NumBufferedOperations() {
+  return pg_session_->NumBufferedOperations();
 }
 
 Status PgApiImpl::DmlExecWriteOp(PgStatement *handle, int32_t *rows_affected_count) {

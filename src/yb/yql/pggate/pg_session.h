@@ -51,6 +51,10 @@ struct BufferableOperation {
   // Postgres's relation id. Required to resolve constraint name in case
   // operation will fail with PGSQL_STATUS_DUPLICATE_KEY_ERROR.
   PgObjectId relation_id;
+
+  std::string ToString() const {
+    return YB_STRUCT_TO_STRING(operation, relation_id);
+  }
 };
 
 typedef std::vector<BufferableOperation> PgsqlOpBuffer;
@@ -207,18 +211,11 @@ class PgSession : public RefCountedThreadSafe<PgSession> {
   Result<PgTableDescPtr> LoadTable(const PgObjectId& table_id);
   void InvalidateTableCache(const PgObjectId& table_id);
 
-  // Start operation buffering. Buffering must not be in progress.
-  CHECKED_STATUS StartOperationsBuffering();
-  // Flush all pending buffered operation and stop further buffering.
-  // Buffering must be in progress.
-  CHECKED_STATUS StopOperationsBuffering();
-  // Drop all pending buffered operations and stop further buffering. Buffering may be in any state.
-  void ResetOperationsBuffering();
-
   // Flush all pending buffered operations. Buffering mode remain unchanged.
   CHECKED_STATUS FlushBufferedOperations();
   // Drop all pending buffered operations. Buffering mode remain unchanged.
   void DropBufferedOperations();
+  int NumBufferedOperations();
 
   // Run (apply + flush) the given operation to read and write database content.
   // Template is used here to handle all kind of derived operations
@@ -426,7 +423,7 @@ class PgSession : public RefCountedThreadSafe<PgSession> {
   boost::unordered_set<PgForeignKeyReference> fk_reference_intent_;
 
   // Should write operations be buffered?
-  bool buffering_enabled_ = false;
+  bool buffering_enabled_ = true;
   PgsqlOpBuffer buffered_ops_;
   PgsqlOpBuffer buffered_txn_ops_;
   std::unordered_set<RowIdentifier, boost::hash<RowIdentifier>> buffered_keys_;

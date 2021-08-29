@@ -392,9 +392,9 @@ class PgApiImpl {
   //   - API for "group_by_expr"
 
   // Buffer write operations.
-  CHECKED_STATUS StartOperationsBuffering();
-  CHECKED_STATUS StopOperationsBuffering();
-  void ResetOperationsBuffering();
+  CHECKED_STATUS FlushBufferedOperations();
+  void DropBufferedOperations();
+  int NumBufferedOperations();
 
   //------------------------------------------------------------------------------------------------
   // Insert.

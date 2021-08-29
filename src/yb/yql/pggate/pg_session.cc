@@ -903,28 +903,6 @@ void PgSession::InvalidateTableCache(const PgObjectId& table_id) {
   table_cache_.erase(table_id);
 }
 
-Status PgSession::StartOperationsBuffering() {
-  SCHECK(!buffering_enabled_, IllegalState, "Buffering has been already started");
-  if (PREDICT_FALSE(!buffered_keys_.empty())) {
-    LOG(DFATAL) << "Buffering hasn't been started yet but "
-                << buffered_keys_.size()
-                << " buffered operations found";
-  }
-  buffering_enabled_ = true;
-  return Status::OK();
-}
-
-Status PgSession::StopOperationsBuffering() {
-  SCHECK(buffering_enabled_, IllegalState, "Buffering hasn't been started");
-  buffering_enabled_ = false;
-  return FlushBufferedOperations();
-}
-
-void PgSession::ResetOperationsBuffering() {
-  DropBufferedOperations();
-  buffering_enabled_ = false;
-}
-
 Status PgSession::FlushBufferedOperations() {
   return FlushBufferedOperationsImpl(
       [this](auto ops, auto txn) { return this->FlushOperations(std::move(ops), txn); });
@@ -936,6 +914,10 @@ void PgSession::DropBufferedOperations() {
   buffered_keys_.clear();
   buffered_ops_.clear();
   buffered_txn_ops_.clear();
+}
+
+int PgSession::NumBufferedOperations() {
+  return buffered_ops_.size() + buffered_txn_ops_.size();
 }
 
 Status PgSession::FlushBufferedOperationsImpl(const Flusher& flusher) {
@@ -1035,10 +1017,12 @@ Status PgSession::FlushOperations(PgsqlOpBuffer ops, IsTransactionalSession tran
   }
   for (const auto& buffered_op : ops) {
     RETURN_NOT_OK(ApplyOperation(session, transactional, buffered_op));
+    VLOG(4) << "Flushed op=" << AsString(buffered_op);
   }
   const auto flush_status = session->FlushFuture().get();
   RETURN_NOT_OK(CombineErrorsToStatus(flush_status.errors, flush_status.status));
   for (const auto& buffered_op : ops) {
+    VLOG(4) << "Handle response for flushed op=" << AsString(buffered_op);
     RETURN_NOT_OK(HandleResponse(*buffered_op.operation, buffered_op.relation_id));
   }
   return Status::OK();

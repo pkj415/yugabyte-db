@@ -602,16 +602,16 @@ YBCStatus YBCPgDmlFetch(YBCPgStatement handle, int32_t natts, uint64_t *values, 
   return ToYBCStatus(pgapi->DmlFetch(handle, natts, values, isnulls, syscols, has_data));
 }
 
-YBCStatus YBCPgStartOperationsBuffering() {
-  return ToYBCStatus(pgapi->StartOperationsBuffering());
+YBCStatus YBCPgFlushBufferedOperations() {
+  return ToYBCStatus(pgapi->FlushBufferedOperations());
 }
 
-YBCStatus YBCPgStopOperationsBuffering() {
-  return ToYBCStatus(pgapi->StopOperationsBuffering());
+void YBCPgDropBufferedOperations() {
+  pgapi->DropBufferedOperations();
 }
 
-void YBCPgResetOperationsBuffering() {
-  pgapi->ResetOperationsBuffering();
+int YBCPgNumBufferedOperations() {
+  return pgapi->NumBufferedOperations();
 }
 
 YBCStatus YBCPgDmlExecWriteOp(YBCPgStatement handle, int32_t *rows_affected_count) {

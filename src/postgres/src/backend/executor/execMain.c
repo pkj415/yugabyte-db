@@ -325,9 +325,6 @@ standard_ExecutorRun(QueryDesc *queryDesc,
 	Assert(estate != NULL);
 	Assert(!(estate->es_top_eflags & EXEC_FLAG_EXPLAIN_ONLY));
 
-	if (IsYugaByteEnabled())
-		YBBeginOperationsBuffering();
-
 	/*
 	 * Switch into per-query memory context
 	 */
@@ -374,6 +371,9 @@ standard_ExecutorRun(QueryDesc *queryDesc,
 					dest,
 					execute_once);
 	}
+
+	if (IsYugaByteEnabled())
+		YBFlushBufferedOperations();
 
 	/*
 	 * shutdown tuple receiver, if we started it
@@ -440,10 +440,6 @@ standard_ExecutorFinish(QueryDesc *queryDesc)
 	/* Execute queued AFTER triggers, unless told not to */
 	if (!(estate->es_top_eflags & EXEC_FLAG_SKIP_TRIGGERS))
 		AfterTriggerEndQuery(estate);
-
-	// Flush buffered operations straight before elapsed time calculation.
-	if (IsYugaByteEnabled())
-		YBEndOperationsBuffering();
 
 	if (queryDesc->totaltime)
 		InstrStopNode(queryDesc->totaltime, 0);

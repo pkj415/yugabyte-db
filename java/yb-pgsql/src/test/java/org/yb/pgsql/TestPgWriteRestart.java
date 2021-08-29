@@ -17,11 +17,17 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.yb.util.ThreadUtil;
 import org.yb.util.YBTestRunnerNonTsanOnly;
 
 import java.sql.*;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.TimeUnit;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -285,6 +291,76 @@ public class TestPgWriteRestart extends BasePgSQLTest {
     } catch (PSQLException ex) {
       LOG.error("Unexpected exception:", ex);
       throw ex;
+    }
+  }
+
+  @Test
+  public void testSelectConflictRestart() throws Exception {
+    try (Statement statement = connection.createStatement()) {
+      statement.execute("create table test (k SERIAL primary key, v int)");
+      statement.execute("insert into test (v) SELECT generate_series(0,100)");
+    } catch (Exception ex) {
+      fail("Unexpected exception: " + ex.getMessage());
+    }
+
+    ExecutorService es = Executors.newFixedThreadPool(2);
+    List<Future<?>> futures = new ArrayList<Future<?>>();
+
+    final class SelectRunnable implements Runnable {
+
+      public SelectRunnable() {}
+
+      public void run() {
+        int executionsAttempted = 0;
+        int executionsAborted = 0;
+        int executionsAbortedAfterSelectDone = 0;
+        try (Connection conn = getConnectionBuilder().connect();
+             Statement stmt = conn.createStatement()) {
+          for (/* No setup */;; ++executionsAttempted) {
+            if (Thread.interrupted()) return; // Skips all post-loop checks
+            stmt.execute("start transaction isolation level serializable");
+            stmt.execute("select * from test where v > 0 for update");
+            try {
+              stmt.execute("commit");
+            } catch (Exception ex) {
+              if (ex.getMessage().toLowerCase().contains("abort")) {
+                ++executionsAbortedAfterSelectDone;
+              }
+            }
+          }
+        } catch (Exception ex) {
+          // We expect no kConflict/kReadRestart errors in the first SELECT statement of a txn,
+          if (ex.getMessage().toLowerCase().contains("abort")) {
+            ++executionsAborted;
+          } else {
+            fail("failed with ex: " + ex.getMessage());
+          }
+        }
+        LOG.info("executionsAttempted=" + executionsAttempted +
+                 " executionsAborted=" + executionsAborted +
+                 ", executionsAbortedAfterSelectDone=" + executionsAbortedAfterSelectDone);
+      }
+    }
+
+    futures.add((Future<?>) es.submit(new SelectRunnable()));
+    futures.add((Future<?>) es.submit(new SelectRunnable()));
+
+    Thread.sleep(1000 * 60); // Run test for 60 seconds
+    LOG.info("Shutting down executor service");
+    es.shutdownNow(); // This should interrupt all submitted threads
+    if (es.awaitTermination(10, TimeUnit.SECONDS)) {
+      LOG.info("Executor shutdown complete");
+    } else {
+      LOG.info("Executor shutdown failed (timed out)");
+    }
+    try {
+      LOG.info("Waiting for SELECT threads");
+      for (Future<?> future : futures) {
+        future.get(1, TimeUnit.SECONDS);
+      }
+    } catch (TimeoutException ex) {
+      LOG.warn("Threads info:\n\n" + ThreadUtil.getAllThreadsInfo());
+      fail("Waiting for SELECT threads timed out, this is unexpected!");
     }
   }
 }

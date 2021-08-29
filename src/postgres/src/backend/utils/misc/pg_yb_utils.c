@@ -503,6 +503,8 @@ YBCCommitTransaction()
 	if (!IsYugaByteEnabled())
 		return;
 
+	// TODO(Piyush): Add debug assertion that number of buffered ops is 0.
+  // In release mode flush all ops for safety.
 	HandleYBStatus(YBCPgCommitTransaction());
 }
 
@@ -512,6 +514,8 @@ YBCAbortTransaction()
 	if (!IsYugaByteEnabled())
 		return;
 
+	// TODO(Piyush): Add assertion that number of buffered ops is 0.
+  // In release mode drop all ops for safety.
 	if (YBTransactionsEnabled())
 		HandleYBStatus(YBCPgAbortTransaction());
 }
@@ -1294,26 +1298,16 @@ static void YBCInstallTxnDdlHook() {
 	}
 };
 
-static unsigned int buffering_nesting_level = 0;
-
-void YBBeginOperationsBuffering() {
-	if (++buffering_nesting_level == 1) {
-		HandleYBStatus(YBCPgStartOperationsBuffering());
-	}
+void YBFlushBufferedOperations() {
+	HandleYBStatus(YBCPgFlushBufferedOperations());
 }
 
-void YBEndOperationsBuffering() {
-	// buffering_nesting_level could be 0 because YBResetOperationsBuffering was called
-	// on starting new query and postgres calls standard_ExecutorFinish on non finished executor
-	// from previous failed query.
-	if (buffering_nesting_level && !--buffering_nesting_level) {
-		HandleYBStatus(YBCPgStopOperationsBuffering());
-	}
+void YBDropBufferedOperations() {
+	YBCPgDropBufferedOperations();
 }
 
-void YBResetOperationsBuffering() {
-	buffering_nesting_level = 0;
-	YBCPgResetOperationsBuffering();
+int YBNumBufferedOperations() {
+	return YBCPgNumBufferedOperations();
 }
 
 bool YBReadFromFollowersEnabled() {
