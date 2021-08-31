@@ -24,6 +24,7 @@
 #include "yb/rpc/connection.h"
 #include "yb/rpc/messenger.h"
 #include "yb/rpc/rpc_context.h"
+#include "yb/util/flag_tags.h"
 
 #include "yb/yql/cql/cqlserver/cql_service.h"
 
@@ -89,28 +90,42 @@ DECLARE_int32(client_read_write_timeout_ms);
 
 // LDAP specific flags
 DEFINE_bool(ycql_use_ldap, false, "Use LDAP for user logins");
+TAG_FLAG(ycql_use_ldap, runtime);
 DEFINE_string(ycql_ldap_users_to_skip_csv, "", "Users that are authenticated via the local password"
   " check instead of LDAP (if ycql_use_ldap=true). This is a comma separated list");
+TAG_FLAG(ycql_ldap_users_to_skip_csv, runtime);
+TAG_FLAG(ycql_ldap_users_to_skip_csv, sensitive_info);
 DEFINE_string(ycql_ldap_server, "", "LDAP server of the form <scheme>://<ip>:<port>");
+TAG_FLAG(ycql_ldap_server, runtime);
 DEFINE_bool(ycql_ldap_tls, false, "Connect to LDAP server using TLS encryption.");
+TAG_FLAG(ycql_ldap_tls, runtime);
 
 // LDAP flags for simple bind mode
 DEFINE_string(ycql_ldap_user_prefix, "", "String used for prepending the user name when forming "
   "the DN for binding to the LDAP server");
+TAG_FLAG(ycql_ldap_user_prefix, runtime);
 DEFINE_string(ycql_ldap_user_suffix, "", "String used for appending the user name when forming the "
   "DN for binding to the LDAP Server.");
+TAG_FLAG(ycql_ldap_user_suffix, runtime);
 
 // Flags for LDAP search + bind mode
 DEFINE_string(ycql_ldap_base_dn, "", "Specifies the base directory to begin the user name search");
+TAG_FLAG(ycql_ldap_base_dn, runtime);
 DEFINE_string(ycql_ldap_bind_dn, "", "Specifies the username to perform the initial search when "
   "doing search + bind authentication");
+TAG_FLAG(ycql_ldap_bind_dn, runtime);
+TAG_FLAG(ycql_ldap_bind_dn, sensitive_info);
 DEFINE_string(ycql_ldap_bind_passwd, "", "Password for username being used to perform the initial "
   "search when doing search + bind authentication");
+TAG_FLAG(ycql_ldap_bind_passwd, runtime);
+TAG_FLAG(ycql_ldap_bind_passwd, sensitive_info);
 DEFINE_string(ycql_ldap_search_attribute, "", "Attribute to match against the username in the "
   "search when doing search + bind authentication. If no attribute is specified, the uid attribute "
   "is used.");
+TAG_FLAG(ycql_ldap_search_attribute, runtime);
 DEFINE_string(ycql_ldap_search_filter, "", "The search filter to use when doing search + bind "
   "authentication.");
+TAG_FLAG(ycql_ldap_search_filter, runtime);
 
 namespace yb {
 namespace cqlserver {
@@ -679,16 +694,20 @@ Result<LDAPHolder> InitializeLDAPConnection(const char *uris) {
 }
 
 Result<bool> CheckLDAPAuth(const ql::AuthResponseRequest::AuthQueryParameters& params) {
-  VLOG(4) << "Attempting ldap_initialize() with " << FLAGS_ycql_ldap_server;
-  if (FLAGS_ycql_ldap_server.empty())
+  std::string ycql_ldap_server = google::GetCommandLineFlagInfoOrDie(
+      "ycql_ldap_server").current_value;
+  VLOG(4) << "Attempting ldap_initialize() with " << ycql_ldap_server;
+  if (ycql_ldap_server.empty())
     return STATUS(InvalidArgument, "LDAP server not specified");
 
-  const auto& uris = FLAGS_ycql_ldap_server;
+  const auto& uris = ycql_ldap_server;
   auto ldap = VERIFY_RESULT(InitializeLDAPConnection(uris.c_str()));
 
   int r;
   std::string fulluser;
-  if (!FLAGS_ycql_ldap_base_dn.empty()) {
+  std::string ycql_ldap_base_dn = google::GetCommandLineFlagInfoOrDie(
+      "ycql_ldap_base_dn").current_value;
+  if (!ycql_ldap_base_dn.empty()) {
     /*
     * First perform an LDAP search to find the DN for the user we are
     * trying to log in as.
@@ -719,16 +738,21 @@ Result<bool> CheckLDAPAuth(const ql::AuthResponseRequest::AuthQueryParameters& p
     * searching. If none is specified, this turns into an anonymous bind.
     */
     struct berval cred;
-    ber_str2bv(FLAGS_ycql_ldap_bind_passwd.c_str(), 0 /* len */, 0 /* duplicate */ , &cred);
-    r = ldap_sasl_bind_s(ldap.get(), FLAGS_ycql_ldap_bind_dn.c_str(),
-                         LDAP_SASL_SIMPLE, &cred,
-                         NULL /* serverctrls */, NULL /* clientctrls */,
-                         NULL /* servercredp */);
+    ber_str2bv(
+        google::GetCommandLineFlagInfoOrDie("ycql_ldap_bind_passwd").current_value.c_str(),
+        0 /* len */, 0 /* duplicate */ , &cred);
+    r = ldap_sasl_bind_s(
+        ldap.get(),
+        google::GetCommandLineFlagInfoOrDie("ycql_ldap_bind_dn").current_value.c_str(),
+        LDAP_SASL_SIMPLE, &cred,
+        NULL /* serverctrls */, NULL /* clientctrls */,
+        NULL /* servercredp */);
     if (r != LDAP_SUCCESS) {
       return STATUS_FORMAT(
         InvalidArgument,
         "could not perform initial LDAP bind for ldapbinddn '$0' on server '$1': $2",
-        FLAGS_ycql_ldap_bind_dn, FLAGS_ycql_ldap_server, LDAPError(r, ldap));
+        google::GetCommandLineFlagInfoOrDie("ycql_ldap_bind_dn").current_value,
+        ycql_ldap_server, LDAPError(r, ldap));
     }
 
     std::string filter;
@@ -736,21 +760,25 @@ Result<bool> CheckLDAPAuth(const ql::AuthResponseRequest::AuthQueryParameters& p
     // TODO(Piyush): Support the search filter mode
     // if (FLAGS_ycql_ldap_search_filter)
     //   filter = FormatSearchFilter(FLAGS_ycql_ldap_search_filter, params.username);
-    if (!FLAGS_ycql_ldap_search_attribute.empty()) {
-      filter = "(" + FLAGS_ycql_ldap_search_attribute + "=" + params.username + ")";
+
+    std::string ycql_ldap_search_attribute = google::GetCommandLineFlagInfoOrDie(
+        "ycql_ldap_search_attribute").current_value;
+    if (!ycql_ldap_search_attribute.empty()) {
+      filter = "(" + ycql_ldap_search_attribute + "=" + params.username + ")";
     } else {
       filter = "(uid=" + params.username + ")";
     }
 
     LDAPMessage *search_message;
-    r = ldap_search_ext_s(ldap.get(), FLAGS_ycql_ldap_base_dn.c_str(), LDAP_SCOPE_SUBTREE,
-                          filter.c_str(), attributes, 0, NULL, NULL, NULL, 0, &search_message);
+    r = ldap_search_ext_s(
+        ldap.get(), ycql_ldap_base_dn.c_str(), LDAP_SCOPE_SUBTREE, filter.c_str(), attributes, 0,
+        NULL, NULL, NULL, 0, &search_message);
     LDAPMessageHolder search_message_holder{search_message};
 
     if (r != LDAP_SUCCESS) {
       return STATUS_FORMAT(
           InternalError, "could not search LDAP for filter '$0' on server '$1': $2", filter,
-          FLAGS_ycql_ldap_server, LDAPError(r, ldap));
+          ycql_ldap_server, LDAPError(r, ldap));
     }
 
     auto count = ldap_count_entries(ldap.get(), search_message);
@@ -760,7 +788,7 @@ Result<bool> CheckLDAPAuth(const ql::AuthResponseRequest::AuthQueryParameters& p
             NotFound,
             "LDAP user '$0' does not exist. "\
             "LDAP search for filter '$1' on server '$2' returned no entries.",
-            params.username, filter, FLAGS_ycql_ldap_server);
+            params.username, filter, ycql_ldap_server);
       case 1:
         break;
       default:
@@ -777,7 +805,7 @@ Result<bool> CheckLDAPAuth(const ql::AuthResponseRequest::AuthQueryParameters& p
       ldap_get_option(ldap.get(), LDAP_OPT_ERROR_NUMBER, &error);
       return STATUS_FORMAT(
           NotFound, "could not get dn for the first entry matching '$0' on server '$1': $2",
-          filter, FLAGS_ycql_ldap_server, LDAPError(error, ldap));
+          filter, ycql_ldap_server, LDAPError(error, ldap));
     }
     LDAPMemoryHolder<char> dn_holder{dn};
     fulluser = dn;
@@ -788,7 +816,9 @@ Result<bool> CheckLDAPAuth(const ql::AuthResponseRequest::AuthQueryParameters& p
     */
     ldap = VERIFY_RESULT(InitializeLDAPConnection(uris.c_str()));
   } else {
-    fulluser = FLAGS_ycql_ldap_user_prefix + params.username + FLAGS_ycql_ldap_user_suffix;
+    fulluser = google::GetCommandLineFlagInfoOrDie("ycql_ldap_user_prefix").current_value +
+               params.username +
+               google::GetCommandLineFlagInfoOrDie("ycql_ldap_user_suffix").current_value;
   }
 
   VLOG(4) << "Checking authentication using LDAP for user DN=" << fulluser;
@@ -804,7 +834,7 @@ Result<bool> CheckLDAPAuth(const ql::AuthResponseRequest::AuthQueryParameters& p
   if (r != LDAP_SUCCESS) {
     std::ostringstream str;
     str << "LDAP login failed for user '" << fulluser << "' on server '"
-        << FLAGS_ycql_ldap_server << "': " << LDAPError(r, ldap);
+        << ycql_ldap_server << "': " << LDAPError(r, ldap);
     auto error_msg = str.str();
     if (r == LDAP_INVALID_CREDENTIALS) {
       LOG(ERROR) << error_msg;
@@ -845,7 +875,9 @@ unique_ptr<CQLResponse> CQLProcessor::ProcessAuthResult(const string& saved_hash
   unique_ptr<CQLResponse> response = nullptr;
   bool authenticated = false;
 
-  if (FLAGS_ycql_use_ldap && !UserIn(params.username, FLAGS_ycql_ldap_users_to_skip_csv)) {
+  if (FLAGS_ycql_use_ldap &&
+      !UserIn(params.username,
+              google::GetCommandLineFlagInfoOrDie("ycql_ldap_users_to_skip_csv").current_value)) {
     Result<bool> ldap_auth_result = CheckLDAPAuth(req.params());
     if (!ldap_auth_result.ok()) {
       return make_unique<ErrorResponse>(
