@@ -27,6 +27,8 @@
 
 #include "yb/common/common.pb.h"
 #include "yb/common/transaction.h"
+#include "yb/common/transaction_error.h"
+#include "yb/common/ybc_util.h"
 
 #include "yb/rpc/messenger.h"
 #include "yb/rpc/rpc.h"
@@ -433,7 +435,10 @@ class YBTransaction::Impl final {
             // State will be changed to aborted in SetError
           }
         }
-        SetErrorUnlocked(status);
+        const TransactionError txn_err(status);
+        if (txn_err.value() != TransactionErrorCode::kSkipLocking) {
+          SetErrorUnlocked(status);
+        }
       }
 
       if (running_requests_ == 0 && commit_replicated_) {
