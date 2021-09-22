@@ -15,6 +15,8 @@
 
 #include "yb/yql/cql/cqlserver/cql_processor.h"
 
+#define LDAP_DEPRECATED 1
+
 #include <ldap.h>
 
 #include "yb/common/ql_value.h"
@@ -617,7 +619,7 @@ struct LDAPMessageDeleter {
 };
 
 struct LDAPDeleter {
-  void operator()(LDAP* ptr) const { ldap_unbind_ext(ptr, NULL, NULL); }
+  void operator()(LDAP* ptr) const { ldap_unbind(ptr); }
 };
 
 using LDAPHolder = unique_ptr<LDAP, LDAPDeleter>;
@@ -718,12 +720,8 @@ Result<bool> CheckLDAPAuth(const ql::AuthResponseRequest::AuthQueryParameters& p
     * Bind with a pre-defined username/password (if available) for
     * searching. If none is specified, this turns into an anonymous bind.
     */
-    struct berval cred;
-    ber_str2bv(FLAGS_ycql_ldap_bind_passwd.c_str(), 0 /* len */, 0 /* duplicate */ , &cred);
-    r = ldap_sasl_bind_s(ldap.get(), FLAGS_ycql_ldap_bind_dn.c_str(),
-                         LDAP_SASL_SIMPLE, &cred,
-                         NULL /* serverctrls */, NULL /* clientctrls */,
-                         NULL /* servercredp */);
+    r = ldap_simple_bind_s(ldap.get(), FLAGS_ycql_ldap_bind_dn.c_str(),
+                           FLAGS_ycql_ldap_bind_passwd.c_str());
     if (r != LDAP_SUCCESS) {
       return STATUS_FORMAT(
         InvalidArgument,
@@ -743,8 +741,8 @@ Result<bool> CheckLDAPAuth(const ql::AuthResponseRequest::AuthQueryParameters& p
     }
 
     LDAPMessage *search_message;
-    r = ldap_search_ext_s(ldap.get(), FLAGS_ycql_ldap_base_dn.c_str(), LDAP_SCOPE_SUBTREE,
-                          filter.c_str(), attributes, 0, NULL, NULL, NULL, 0, &search_message);
+    r = ldap_search_s(ldap.get(), FLAGS_ycql_ldap_base_dn.c_str(), LDAP_SCOPE_SUBTREE,
+                      filter.c_str(), attributes, 0, &search_message);
     LDAPMessageHolder search_message_holder{search_message};
 
     if (r != LDAP_SUCCESS) {
@@ -793,13 +791,8 @@ Result<bool> CheckLDAPAuth(const ql::AuthResponseRequest::AuthQueryParameters& p
 
   VLOG(4) << "Checking authentication using LDAP for user DN=" << fulluser;
 
-  struct berval cred;
-  ber_str2bv(params.password.c_str(), 0 /* len */, 0 /* duplicate */, &cred);
-  r = ldap_sasl_bind_s(ldap.get(), fulluser.c_str(),
-                       LDAP_SASL_SIMPLE, &cred,
-                       NULL /* serverctrls */, NULL /* clientctrls */,
-                       NULL /* servercredp */);
-  VLOG(4) << "ldap_sasl_bind_s return value =" << r;
+  r = ldap_simple_bind_s(ldap.get(), fulluser.c_str(), params.password.c_str());
+  VLOG(4) << "ldap_simple_bind_s return value =" << r;
 
   if (r != LDAP_SUCCESS) {
     std::ostringstream str;
