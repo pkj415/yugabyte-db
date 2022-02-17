@@ -199,6 +199,7 @@ Status PgDocOp::GetResult(list<PgDocResult> *rowsets) {
     rowsets->splice(rowsets->end(), rows);
     // Prefetch next portion of data if needed.
     if (!(end_of_data_ || suppress_next_result_prefetching_)) {
+      pg_session_->SetHasUsedPrefetching();
       exec_status_ = SendRequest(true /* force_non_bufferable */);
       RETURN_NOT_OK(exec_status_);
     }

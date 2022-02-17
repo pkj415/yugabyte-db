@@ -1161,5 +1161,9 @@ Status PgSession::ValidatePlacement(const string& placement_info) {
   return pg_client_.ValidatePlacement(&req);
 }
 
+void PgSession::SetHasUsedPrefetching() {
+  pg_txn_manager_->SetHasUsedPrefetching();
+}
+
 }  // namespace pggate
 }  // namespace yb
