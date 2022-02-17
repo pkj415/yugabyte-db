@@ -332,6 +332,8 @@ class PgSession : public RefCountedThreadSafe<PgSession> {
 
   bool ShouldUseFollowerReads() const;
 
+  void SetHasUsedPrefetching();
+
  private:
   using Flusher = std::function<Status(PgsqlOpBuffer, IsTransactionalSession)>;
 

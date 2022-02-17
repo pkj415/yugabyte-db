@@ -341,6 +341,10 @@ Status PgTxnManager::BeginWriteTransactionIfNecessary(bool read_only_op,
       DCHECK_EQ(docdb_isolation, IsolationLevel::SERIALIZABLE_ISOLATION);
       RETURN_NOT_OK(txn_->Init(docdb_isolation));
     }
+
+    if (session_->GetHasUsedPrefetching())
+      txn_->SetHasUsedPrefetching();
+
     session_->SetTransaction(txn_);
 
     VLOG_TXN_STATE(2) << "effective isolation level: "
@@ -442,6 +446,19 @@ void PgTxnManager::AbortTransaction() {
   // TODO: how do we report errors if the transaction has already committed?
   txn_->Abort();
   ResetTxnAndSession();
+}
+
+void PgTxnManager::SetHasUsedPrefetching() {
+  CHECK(txn_in_progress_);
+  CHECK_NOTNULL(session_);
+
+  if (txn_) {
+    txn_->SetHasUsedPrefetching();
+    return;
+  }
+
+  session_->SetHasUsedPrefetching();
+  return;
 }
 
 // TODO: dedup with similar logic in CQLServiceImpl.

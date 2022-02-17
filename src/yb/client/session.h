@@ -217,6 +217,14 @@ class YBSession : public std::enable_shared_from_this<YBSession> {
   // It is useful when whole statement is executed using multiple flushes.
   void SetForceConsistentRead(ForceConsistentRead value);
 
+  bool GetHasUsedPrefetching() const {
+    return has_used_prefetching_;
+  }
+
+  void SetHasUsedPrefetching() {
+    has_used_prefetching_ = true;
+  }
+
   const internal::AsyncRpcMetricsPtr& async_rpc_metrics() const {
     return async_rpc_metrics_;
   }
@@ -271,6 +279,9 @@ class YBSession : public std::enable_shared_from_this<YBSession> {
   MonoDelta timeout_;
 
   internal::AsyncRpcMetricsPtr async_rpc_metrics_;
+
+  // Whether any rpc was sent for prefetching data as part of the txn.
+  bool has_used_prefetching_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(YBSession);
 };

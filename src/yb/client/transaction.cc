@@ -714,6 +714,10 @@ class YBTransaction::Impl final : public internal::TxnBatcherIf {
     return subtransaction_opt_ != boost::none;
   }
 
+  void SetHasUsedPrefetching() {
+    has_used_prefetching_ = true;
+  }
+
  private:
   void CompleteConstruction() {
     log_prefix_ = Format("$0$1: ", metadata_.transaction_id, child_ ? " (CHILD)" : "");
@@ -1187,8 +1191,32 @@ class YBTransaction::Impl final : public internal::TxnBatcherIf {
       return STATUS(IllegalState, "Commit of child transaction is not allowed");
     }
     if (IsRestartRequired()) {
-      return STATUS(
-          IllegalState, "Commit of transaction that requires restart is not allowed");
+      if (has_used_prefetching_) {
+        // We can reach commit stage even after a kReadRestart if a read restart error was seen on a
+        // rpc to a tserver and -
+        //   1. the response wasn't used (or)
+        //   2. the response was used and there is some bug in YSQL code that doesn't report the
+        //      error to the topmost level where it is either retried or passed to the client.
+        //
+        // An example of case 1:
+        // In case a prefetch rpc is sent by a SELECT with LIMIT and the prefetch rpc faces
+        // kReadRestart but the limit was satisfied with results from the previous rpc itself -- in
+        // this case, PgSession::HandleResponse() isn't called on the prefetch rpc.
+        //
+        // For case 1, we don't want to throw an IllegalState. The user should be able to commit.
+        // We do so by just logging the fact instead of throwing a STATUS if has_used_prefetching_
+        // is true.
+        //
+        // But since has_used_prefetching_ is also true for case 2 and not just case 1, the
+        // side-effect is that we just log for that as well instead of really raising an error.
+        //
+        // TODO(Piyush): Populate more information to differentiate between case 1 and 2.
+        LOG(INFO) << "Committing a transaction that performed prefetch rpc(s) and hit kReadRestart."
+                  << "This is not an issue, just a rare occurrence which is logged.";
+      } else {
+        return STATUS(
+            IllegalState, "Commit of transaction that requires restart is not allowed");
+      }
     }
     if (!seal_only && running_requests_ > 0) {
       return STATUS(IllegalState, "Commit of transaction with running requests");
@@ -1260,6 +1288,9 @@ class YBTransaction::Impl final : public internal::TxnBatcherIf {
   size_t running_requests_ GUARDED_BY(mutex_) = 0;
   // Set to true after commit record is replicated. Used only during transaction sealing.
   bool commit_replicated_ = false;
+
+  // Whether any rpc was sent for prefetching data as part of the txn.
+  bool has_used_prefetching_ = false;
 };
 
 CoarseTimePoint AdjustDeadline(CoarseTimePoint deadline) {
@@ -1416,6 +1447,10 @@ Status YBTransaction::RollbackSubTransaction(SubTransactionId id) {
 
 bool YBTransaction::HasSubTransactionState() {
   return impl_->HasSubTransactionState();
+}
+
+void YBTransaction::SetHasUsedPrefetching() {
+  impl_->SetHasUsedPrefetching();
 }
 
 } // namespace client
