@@ -95,6 +95,10 @@ class PgTxnManager : public RefCountedThreadSafe<PgTxnManager> {
   bool IsTxnInProgress() const { return txn_in_progress_; }
   bool ShouldUseFollowerReads() const { return updated_read_time_for_follower_reads_; }
 
+  void SetHasUsedPrefetching();
+
+  ConsistentReadPoint* GetReadPoint();
+
  private:
   YB_STRONGLY_TYPED_BOOL(NeedsHigherPriorityTxn);
   YB_STRONGLY_TYPED_BOOL(SavePriority);

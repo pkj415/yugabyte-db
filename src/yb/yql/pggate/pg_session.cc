@@ -1114,6 +1114,16 @@ Status PgSession::HandleResponse(const client::YBPgsqlOp& op, const PgObjectId& 
     s = STATUS(QLError, op.response().error_message(), Slice(),
                PgsqlError(pg_error_code));
   }
+
+  if (txn_error_code == TransactionErrorCode::kReadRestartRequired) {
+    auto restart_read_time = ReadHybridTime::FromRestartReadTimePB(response);
+    CHECK(restart_read_time);
+    ConsistentReadPoint* read_point = pg_txn_manager_->GetReadPoint();
+    if (read_point) {
+      read_point->RestartRequired(op.GetTabletId(), restart_read_time);
+    }
+  }
+
   return s.CloneAndAddErrorCode(TransactionError(txn_error_code));
 }
 

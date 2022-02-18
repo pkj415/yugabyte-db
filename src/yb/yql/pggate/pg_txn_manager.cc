@@ -438,6 +438,23 @@ Status PgTxnManager::RestartReadPoint() {
   return Status::OK();
 }
 
+void PgTxnManager::SetHasUsedPrefetching() {
+  CHECK(txn_in_progress_);
+  CHECK_NOTNULL(session_);
+
+  if (txn_) {
+    txn_->SetHasUsedPrefetching();
+    return;
+  }
+
+  session_->SetHasUsedPrefetching();
+  return;
+}
+
+ConsistentReadPoint* PgTxnManager::GetReadPoint() {
+  return session_->read_point();
+}
+
 Status PgTxnManager::CommitTransaction() {
   if (!txn_in_progress_) {
     VLOG_TXN_STATE(2) << "No transaction in progress, nothing to commit.";

@@ -38,6 +38,7 @@
 #include <boost/optional.hpp>
 
 #include "yb/client/client_fwd.h"
+#include "yb/client/meta_cache.h"
 
 #include "yb/common/common_fwd.h"
 #include "yb/common/common_types.pb.h"
@@ -158,6 +159,10 @@ class YBOperation {
 
   int64_t GetQueryId() const {
     return reinterpret_cast<int64_t>(this);
+  }
+
+  TabletId GetTabletId() const {
+    return tablet_->tablet_id();
   }
 
  protected:
