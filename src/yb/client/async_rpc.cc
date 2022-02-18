@@ -379,12 +379,34 @@ bool AsyncRpcBase<Req, Resp>::CommonResponseCheck(const Status& status) {
   if (restart_read_time) {
     auto read_point = batcher_->read_point();
     if (read_point) {
-      read_point->RestartRequired(req_.tablet_id(), restart_read_time);
+      if (ops_[0].yb_op->table()->table_type() != yb::client::YBTableType::PGSQL_TABLE_TYPE) {
+        // We restart the read point in case of PGSQL table in PgSession::HandleResponse() instead
+        // of here. This is done because YSQL might send rpcs to prefetch data which later might not
+        // be used. In that case, a RestartRequired() on the read point will block the txn from
+        // committing by throwing the following IllegalState in CheckCouldCommitUnlocked() -
+        //   "Commit of transaction that requires restart is not allowed"
+        //
+        // To allow committing a txn which faces a kReadRestart in a prefetch rpc which is not used,
+        // we do RestartRequired() on the read point only in PgSession::HandleResponse(). This
+        // function is only called if the reponse from the rpc is used.
+
+        // Example: In case a prefetch rpc is sent by a SELECT with LIMIT and the prefetch rpc faces
+        // kReadRestart but the limit was satisfied with results from the previous rpc itself -- in
+        // this case it is not necessary to throw the IllegalState.
+
+        read_point->RestartRequired(req_.tablet_id(), restart_read_time);
+      } else {
+        YBOperation* yb_op = ops_[0].yb_op.get();
+        auto* pgsql_op = down_cast<YBPgsqlOp*>(yb_op);
+        pgsql_op->set_restart_read_time(restart_read_time);
+        pgsql_op->set_restart_read_tablet_id(req_.tablet_id());
+      }
     }
     Failed(STATUS(TryAgain, Format("Restart read required at: $0", restart_read_time), Slice(),
                   TransactionError(TransactionErrorCode::kReadRestartRequired)));
     return false;
   }
+
   auto local_limit_ht = resp_.local_limit_ht();
   if (local_limit_ht) {
     auto read_point = batcher_->read_point();
@@ -608,6 +630,7 @@ void WriteRpc::SwapResponses() {
           down_cast<YBPgsqlWriteOp*>(yb_op)->mutable_rows_data()->assign(
               to_char_ptr(rows_data.data()), rows_data.size());
         }
+
         pgsql_idx++;
         break;
       }
@@ -756,6 +779,7 @@ void ReadRpc::SwapResponses() {
           down_cast<YBPgsqlReadOp*>(yb_op)->mutable_rows_data()->assign(
               rows_data.cdata(), rows_data.size());
         }
+
         pgsql_idx++;
         break;
       }

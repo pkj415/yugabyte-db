@@ -38,6 +38,7 @@
 #include <boost/optional.hpp>
 
 #include "yb/client/client_fwd.h"
+#include "yb/client/meta_cache.h"
 
 #include "yb/common/common_fwd.h"
 #include "yb/common/common_types.pb.h"
@@ -158,6 +159,10 @@ class YBOperation {
 
   int64_t GetQueryId() const {
     return reinterpret_cast<int64_t>(this);
+  }
+
+  TabletId GetTabletId() const {
+    return tablet_->tablet_id();
   }
 
  protected:
@@ -445,6 +450,22 @@ class YBPgsqlOp : public YBOperation {
     is_active_ = val;
   }
 
+  ReadHybridTime restart_read_time() const {
+    return restart_read_time_;
+  }
+
+  TabletId restart_read_tablet_id() const {
+    return restart_read_tablet_id_;
+  }
+
+  void set_restart_read_time(const ReadHybridTime& read_hybrid_time) {
+    restart_read_time_ = read_hybrid_time;
+  }
+
+  void set_restart_read_tablet_id(TabletId tablet_id) {
+    restart_read_tablet_id_ = tablet_id;
+  }
+
  protected:
   std::unique_ptr<PgsqlResponsePB> response_;
   std::string rows_data_;
@@ -455,6 +476,19 @@ class YBPgsqlOp : public YBOperation {
   // partition value within the ranges that are associated with certain operators, those operators
   // would be set in-active, and their op->request() would not be sent to tablet server.
   bool is_active_ = true;
+
+  // Below fields are only used by YSQL in the following way -
+  //   For YCQL/ Redis, when a tserver rpc (WriteResponsePB or ReadResponsePB) is processed in
+  //   AsyncRpcBase<Req, Resp>::CommonResponseCheck(), if a kReadRestart error is seen, the read
+  //   point is updated with the restart read time of the tserver from the response rpc. But for
+  //   YSQL we intend to update the read point later only in PgSession::HandleResponse() i.e., when
+  //   we actually use the response. This is because the rpc might be a prefetch rpc whose results
+  //   are not even used by YSQL, in which case, we don't want to update the read point.
+  //
+  //   PgSession::HandleResponse() only has access to the internal PgsqlResponsePB. So, we use
+  //   these member variables to plumb the required fields till PgSession.
+  ReadHybridTime restart_read_time_;
+  TabletId restart_read_tablet_id_;
 };
 
 class YBPgsqlWriteOp : public YBPgsqlOp {

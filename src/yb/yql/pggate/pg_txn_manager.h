@@ -22,6 +22,7 @@
 #include "yb/client/transaction_manager.h"
 #include "yb/client/async_initializer.h"
 #include "yb/common/clock.h"
+#include "yb/common/consistent_read_point.h"
 #include "yb/common/transaction.h"
 #include "yb/gutil/ref_counted.h"
 #include "yb/tserver/tserver_util_fwd.h"
@@ -91,6 +92,7 @@ class PgTxnManager : public RefCountedThreadSafe<PgTxnManager> {
   bool IsDdlMode() const { return ddl_session_.get() != nullptr; }
   bool IsTxnInProgress() const { return txn_in_progress_; }
   bool ShouldUseFollowerReads() const { return updated_read_time_for_follower_reads_; }
+  ConsistentReadPoint* GetReadPoint();
 
  private:
   YB_STRONGLY_TYPED_BOOL(NeedsPessimisticLocking);
