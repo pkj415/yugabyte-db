@@ -1418,6 +1418,10 @@ Status PgApiImpl::RestartTransaction() {
   return pg_txn_manager_->RestartTransaction();
 }
 
+MonoDelta PgApiImpl::GetTotalWaitTime() {
+  return pg_session_->GetTotalWaitTime();
+}
+
 Status PgApiImpl::ResetTransactionReadPoint() {
   return pg_txn_manager_->ResetTransactionReadPoint();
 }

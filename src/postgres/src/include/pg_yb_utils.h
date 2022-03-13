@@ -265,6 +265,7 @@ extern void YBCRecreateTransaction();
  * This relies on transaction/session read time already being marked for restart by YB layer.
  */
 extern void YBCRestartTransaction();
+extern uint64_t YBCGetTotalWaitTimeMs();
 
 /*
  * Commits the current YugaByte-level transaction (if any).

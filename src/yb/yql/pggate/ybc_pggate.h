@@ -452,6 +452,7 @@ YBCStatus YBCPgExecSelect(YBCPgStatement handle, const YBCPgExecParameters *exec
 YBCStatus YBCPgBeginTransaction();
 YBCStatus YBCPgRecreateTransaction();
 YBCStatus YBCPgRestartTransaction();
+uint64_t YBCPgGetTotalWaitTimeMs();
 YBCStatus YBCPgResetTransactionReadPoint();
 YBCStatus YBCPgRestartReadPoint();
 YBCStatus YBCPgCommitTransaction();

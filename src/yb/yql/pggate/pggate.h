@@ -484,6 +484,7 @@ class PgApiImpl {
   CHECKED_STATUS BeginTransaction();
   CHECKED_STATUS RecreateTransaction();
   CHECKED_STATUS RestartTransaction();
+  MonoDelta GetTotalWaitTime();
   CHECKED_STATUS ResetTransactionReadPoint();
   CHECKED_STATUS RestartReadPoint();
   CHECKED_STATUS CommitTransaction();

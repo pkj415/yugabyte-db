@@ -136,6 +136,8 @@ class PgSession : public RefCountedThreadSafe<PgSession> {
   // Next catalog read operation will read the very latest catalog's state.
   void ResetCatalogReadPoint();
 
+  MonoDelta GetTotalWaitTime() { return total_wait_time_; };
+
   //------------------------------------------------------------------------------------------------
   // Operations on Session.
   //------------------------------------------------------------------------------------------------
@@ -322,6 +324,7 @@ class PgSession : public RefCountedThreadSafe<PgSession> {
   CHECKED_STATUS RollbackSubTransaction(SubTransactionId id);
 
  private:
+  MonoDelta total_wait_time_= MonoDelta::FromNanoseconds(0);
   using Flusher = std::function<Status(BufferableOperations, IsTransactionalSession,
                                        UseAsyncFlush)>;
 
