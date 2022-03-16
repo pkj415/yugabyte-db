@@ -4534,8 +4534,6 @@ yb_exec_query_wrapper(MemoryContext exec_context,
 	for (int attempt = 0; retry; ++attempt)
 	{
 		uint64_t total_wait_time_before = YBCGetTotalWaitTimeMs();
-		elog(INFO, "yb_exec_query_wrapper attempt %d for %s total wait time before=%llu", attempt, restart_data->query_string,
-			YBCGetTotalWaitTimeMs());
 		YBSaveOutputBufferPosition(
 			!yb_is_begin_transaction(restart_data->command_tag));
 		PG_TRY();
@@ -4553,7 +4551,7 @@ yb_exec_query_wrapper(MemoryContext exec_context,
 			yb_attempt_to_restart_on_error(attempt, restart_data, exec_context);
 		}
 		PG_END_TRY();
-		elog(INFO, "yb_exec_query_wrapper attempt %d for %s total wait time=%llu", attempt, restart_data->query_string,
+		elog(INFO, "yb_exec_query_wrapper attempt %d for %s total wait time=%lu", attempt, restart_data->query_string,
 			YBCGetTotalWaitTimeMs() - total_wait_time_before);
 	}
 }

@@ -625,7 +625,12 @@ Status PgSession::FlushBufferedOperationsImpl(const Flusher& flusher,
   }
   if (!use_async_flush and has_prev_future_) {
     has_prev_future_ = false;
-    return prev_flush_future_.Get();
+
+    auto start_time = MonoTime::Now();
+    auto flush_status = prev_flush_future_.Get();
+    total_wait_time_ += MonoTime::Now() - start_time;
+
+    return flush_status;
   }
   return Status::OK();
 }
