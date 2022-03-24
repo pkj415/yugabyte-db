@@ -202,12 +202,12 @@ PgIsolationLevel PgTxnManager::GetIsolationLevel() {
 
 Status PgTxnManager::SetReadOnly(bool read_only) {
   read_only_ = read_only;
-  VLOG(2) << __func__ << " set to " << read_only_ << " from " << GetStackTrace();
+  VLOG(5) << __func__ << " set to " << read_only_ << " from " << GetStackTrace();
   return UpdateReadTimeForFollowerReadsIfRequired();
 }
 
 Status PgTxnManager::EnableFollowerReads(bool enable_follower_reads, int32_t session_staleness) {
-  VLOG_TXN_STATE(2) << (enable_follower_reads ? "Enabling follower reads "
+  VLOG_TXN_STATE(5) << (enable_follower_reads ? "Enabling follower reads "
                                               : "Disabling follower reads ")
                     << " with staleness " << session_staleness << " ms";
   enable_follower_reads_ = enable_follower_reads;
@@ -230,7 +230,7 @@ Status PgTxnManager::UpdateReadTimeForFollowerReadsIfRequired() {
                       << yb::ToString(session_->read_point()->GetReadTime());
     updated_read_time_for_follower_reads_ = true;
   } else {
-    VLOG(2) << " Not updating read-time " << yb::ToString(pg_isolation_level_)
+    VLOG(5) << " Not updating read-time " << yb::ToString(pg_isolation_level_)
             << (updated_read_time_for_follower_reads_ ? " Already updated." : "")
             << (enable_follower_reads_ ? " Follower reads allowed." : " Follower reads DISallowed.")
             << (read_only_ ? " Is read-only" : " Is NOT read-only");
@@ -253,7 +253,7 @@ void PgTxnManager::StartNewSession() {
 
 uint64_t PgTxnManager::GetPriority(TxnPriorityRequirement txn_priority_requirement) {
 
-  VLOG_WITH_FUNC(1) << "txn_priority_requirement=" << txn_priority_requirement;
+  VLOG_WITH_FUNC(5) << "txn_priority_requirement=" << txn_priority_requirement;
 
   if (use_saved_priority_) {
     return saved_priority_;
@@ -300,7 +300,7 @@ Status PgTxnManager::BeginWriteTransactionIfNecessary(
               : IsolationLevel::SNAPSHOT_ISOLATION);
   const bool defer = read_only_ && deferrable_;
 
-  VLOG_TXN_STATE(2) << "DocDB isolation level: " << IsolationLevel_Name(docdb_isolation);
+  VLOG_TXN_STATE(5) << "DocDB isolation level: " << IsolationLevel_Name(docdb_isolation);
 
   if (txn_) {
     // Sanity check: query layer should ensure that this does not happen.
@@ -418,7 +418,7 @@ Status PgTxnManager::ResetTransactionReadPoint() {
   ConsistentReadPoint* rp = session_->read_point();
   rp->SetCurrentReadTime();
 
-  VLOG(1) << "Setting current ht as read point " << rp->GetReadTime();
+  VLOG(5) << "Setting current ht as read point " << rp->GetReadTime();
   return Status::OK();
 }
 
@@ -449,7 +449,7 @@ Status PgTxnManager::CommitTransaction() {
     ResetTxnAndSession();
     return Status::OK();
   }
-  VLOG_TXN_STATE(2) << "committing transaction.";
+
   Status status = txn_->CommitFuture().get();
   VLOG_TXN_STATE(2) << "transaction commit status: " << status;
   ResetTxnAndSession();
@@ -465,14 +465,17 @@ void PgTxnManager::AbortTransaction() {
   }
 
   if (!txn_in_progress_) {
+    VLOG_TXN_STATE(2) << "No transaction in progress, nothing to abort.";
     return;
   }
   if (!txn_) {
     // This was a read-only transaction, nothing to commit.
+    VLOG_TXN_STATE(2) << "This was a read-only transaction, nothing to abort.";
     ResetTxnAndSession();
     return;
   }
   // TODO: how do we report errors if the transaction has already committed?
+  VLOG_TXN_STATE(2) << "aborting transaction.";
   txn_->Abort();
   ResetTxnAndSession();
 }
@@ -504,7 +507,7 @@ Result<client::YBSession*> PgTxnManager::GetTransactionalSession() {
   if (!txn_in_progress_) {
     RETURN_NOT_OK(BeginTransaction());
   }
-  VLOG_TXN_STATE(2) << "Using the non-DDL transactional session: " << session_.get();
+  VLOG_TXN_STATE(5) << "Using the non-DDL transactional session: " << session_.get();
   return session_.get();
 }
 

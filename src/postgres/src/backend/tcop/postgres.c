@@ -3056,9 +3056,15 @@ ProcessInterrupts(void)
 		if (stmt_timeout_occurred)
 		{
 			LockErrorCleanup();
+			TimestampTz now = GetCurrentTimestamp();
+			char start_time[MAXDATELEN + 1];
+			char finish_time[MAXDATELEN + 1];
+			strcpy(start_time, timestamptz_to_str(get_timeout_start_time(STATEMENT_TIMEOUT)));
+			strcpy(finish_time, timestamptz_to_str(get_timeout_finish_time(STATEMENT_TIMEOUT)));
 			ereport(ERROR,
 					(errcode(ERRCODE_QUERY_CANCELED),
-					 errmsg("canceling statement due to statement timeout")));
+					 errmsg("canceling statement due to statement timeout %d ms start time %s fin time %s current time %s",
+					 	StatementTimeout, start_time, finish_time, timestamptz_to_str(now))));
 		}
 		if (IsAutoVacuumWorkerProcess())
 		{
