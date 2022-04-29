@@ -209,6 +209,9 @@ lnext:
 		}
 
 		if (IsYBBackedRelation(erm->relation)) {
+                        if (erm->waitPolicy == LockWaitError) {
+                            elog(LOG, "Attemping tuple lock with NOWAIT");
+                        }
 			test = YBCLockTuple(erm->relation, datum, erm->markType, erm->waitPolicy,
 													estate);
 		}
