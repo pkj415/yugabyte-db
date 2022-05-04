@@ -1152,6 +1152,13 @@ fmgr_sql(PG_FUNCTION_ARGS)
 					UpdateActiveSnapshotCommandId();
 			}
 
+			elog(LOG, "Piyush - flushing buffered ops before next statement in an SQL language function");
+			// TODO(Piyush): Flush always except for safe-situations.
+			if (es->stmt->commandType == CMD_UPDATE ||
+					es->stmt->commandType == CMD_INSERT ||
+				  es->stmt->commandType == CMD_DELETE)
+				YBFlushBufferedOperations();
+
 			postquel_start(es, fcache);
 		}
 		else if (!fcache->readonly_func && !pushed_snapshot)

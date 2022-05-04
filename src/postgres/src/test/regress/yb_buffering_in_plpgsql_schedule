@@ -1,0 +1,6 @@
+# src/test/regress/yb_buffering_in_plpgsql_schedule
+#
+####################################################################################################
+# This includes tests related to buffering in PL/pgSQL.
+####################################################################################################
+test: yb_buffering_in_plpgsql

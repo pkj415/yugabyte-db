@@ -47,6 +47,7 @@
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
 #include "utils/typcache.h"
+#include "yb/common/ybc_util.h"
 
 #include "plpgsql.h"
 
@@ -1874,6 +1875,22 @@ exec_stmts(PLpgSQL_execstate *estate, List *stmts)
 	foreach(s, stmts)
 	{
 		PLpgSQL_stmt *stmt = (PLpgSQL_stmt *) lfirst(s);
+
+		/*
+		 * Flush buffered operations before executing a statement which might have
+		 * non-transactional side-effects that won't be reverted in case the
+		 * buffered operations (i.e., from previous statements) lead to an
+		 * exception.
+		 */
+		if (stmt->cmd_type != PLPGSQL_STMT_EXECSQL) {
+			/*
+			 * PLPGSQL_STMT_EXECSQL commands require flushing for everything except
+			 * UPDATE/ INSERT and DELETE. So the handling for that is present in
+			 * exec_stmt_execsql().
+			 */
+			YBFlushBufferedOperations();
+		}
+
 		int			rc = exec_stmt(estate, stmt);
 
 		if (rc != PLPGSQL_RC_OK)
@@ -4158,6 +4175,21 @@ exec_stmt_execsql(PLpgSQL_execstate *estate,
 	}
 
 	/*
+	 * Flush buffered operations before executing a statement which might have
+	 * non-transactional side-effects that won't be reverted in case the buffered
+	 * operations (i.e., from previous statements) lead to an exception.
+	 *
+	 * UPDATE/ INSERT and DELETE have only transactional side-effects. If they
+	 * call other functions which might have some statements that lead to
+	 * non-transactional side-effects, a flush will be performed there (e.g. if
+	 * the function called is a plpgsql function, the YBFlushBufferedOperations
+	 * in exec_stmts will take care of flushing before non-transactional work is
+	 * performed).
+	 */
+	if (!stmt->mod_stmt)
+		YBFlushBufferedOperations();
+
+	/*
 	 * Set up ParamListInfo to pass to executor
 	 */
 	paramLI = setup_param_list(estate, expr);
@@ -5868,6 +5900,7 @@ static int
 exec_run_select(PLpgSQL_execstate *estate,
 				PLpgSQL_expr *expr, long maxtuples, Portal *portalP)
 {
+	elog(LOG, "Piyush - exec_run_select()");
 	ParamListInfo paramLI;
 	int			rc;
 
