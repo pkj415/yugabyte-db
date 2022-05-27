@@ -796,11 +796,39 @@ class YBTransaction::Impl final : public internal::TxnBatcherIf {
     return subtransaction_.SetActiveSubTransaction(id);
   }
 
-  Status RollbackSubTransaction(SubTransactionId id) {
+  Status RollbackSubTransaction(SubTransactionId id, CoarseTimePoint deadline) {
     SCHECK(
         subtransaction_.active(), InternalError,
         "Attempted to rollback to savepoint before creating any savepoints.");
-    return subtransaction_.RollbackSubTransaction(id);
+    RETURN_NOT_OK(subtransaction_.RollbackSubTransaction(id));
+
+    auto current_state = state_.load(std::memory_order_acquire);
+    DCHECK(current_state == TransactionState::kRunning);
+
+    // A heartbeat is sent to the txn status tablet to synchronously update the
+    // list of aborted sub-txns. This ensures that other txns don't see false
+    // conflicts with this txn.
+    //
+    // TODO(Piyush):
+    //   1. Send a heartbeat only if status_tablet_ is present.
+    //   2. Send a heartbeat to the promoted status table too if one exists.
+    LOG(INFO) << "sending heartbeat as part of sub-txn rollback";
+    return MakeFuture<Status>([this, deadline](auto callback) {
+      std::lock_guard<std::mutex> lock(mutex_);
+      manager_->rpcs().RegisterAndStart(
+        PrepareHeartbeatRPC(
+            deadline,
+            status_tablet_, TransactionStatus::PENDING,
+            [this, callback](
+                const auto& status, const auto& req, const auto& resp) {
+              UpdateClock(resp, manager_);
+              manager_->rpcs().Unregister(&rollback_heartbeat_handle_);
+              callback(status);
+            }),
+        &rollback_heartbeat_handle_);
+    }).get();
+
+    return Status::OK();
   }
 
   bool HasSubTransactionState() {
@@ -815,6 +843,8 @@ class YBTransaction::Impl final : public internal::TxnBatcherIf {
     commit_handle_ = manager_->rpcs().InvalidHandle();
     abort_handle_ = manager_->rpcs().InvalidHandle();
     old_abort_handle_ = manager_->rpcs().InvalidHandle();
+    rollback_heartbeat_handle_ = manager_->rpcs().InvalidHandle();
+    old_rollback_heartbeat_handle_ = manager_->rpcs().InvalidHandle();
 
     auto metric_entity = manager_->client()->metric_entity();
     if (metric_entity) {
@@ -1789,6 +1819,8 @@ class YBTransaction::Impl final : public internal::TxnBatcherIf {
   rpc::Rpcs::Handle commit_handle_;
   rpc::Rpcs::Handle abort_handle_;
   rpc::Rpcs::Handle old_abort_handle_;
+  rpc::Rpcs::Handle rollback_heartbeat_handle_;
+  rpc::Rpcs::Handle old_rollback_heartbeat_handle_;
 
   // RPC handles for informing participant tablets about a move in transaction status location.
   std::unordered_map<TabletId, rpc::Rpcs::Handle>
@@ -1989,8 +2021,8 @@ void YBTransaction::SetActiveSubTransaction(SubTransactionId id) {
   return impl_->SetActiveSubTransaction(id);
 }
 
-Status YBTransaction::RollbackSubTransaction(SubTransactionId id) {
-  return impl_->RollbackSubTransaction(id);
+Status YBTransaction::RollbackSubTransaction(SubTransactionId id, CoarseTimePoint deadline) {
+  return impl_->RollbackSubTransaction(id, deadline);
 }
 
 bool YBTransaction::HasSubTransactionState() {

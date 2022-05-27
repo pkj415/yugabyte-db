@@ -695,8 +695,6 @@ Status PgSession::SetActiveSubTransaction(SubTransactionId id) {
 }
 
 Status PgSession::RollbackSubTransaction(SubTransactionId id) {
-  // TODO(savepoints) -- send async RPC to transaction status tablet, or rely on heartbeater to
-  // eventually send this metadata.
   // See comment in SetActiveSubTransaction -- we must flush buffered operations before updating any
   // SubTransactionMetadata.
   RETURN_NOT_OK(FlushBufferedOperations());

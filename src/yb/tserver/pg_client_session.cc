@@ -532,7 +532,8 @@ Status PgClientSession::RollbackSubTransaction(
   SCHECK(Transaction(PgClientSessionKind::kPlain), IllegalState,
          Format("Rollback sub transaction $0, when not transaction is running",
                 req.sub_transaction_id()));
-  return Transaction(PgClientSessionKind::kPlain)->RollbackSubTransaction(req.sub_transaction_id());
+  return Transaction(PgClientSessionKind::kPlain)->RollbackSubTransaction(
+      req.sub_transaction_id(), context->GetClientDeadline());
 }
 
 Status PgClientSession::SetActiveSubTransaction(
