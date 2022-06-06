@@ -250,8 +250,8 @@ lnext:
 
 			case HeapTupleUpdated:
 				/*
-				 * TODO(Piyush): If handling using EvalPlanQual for READ COMMITTED in future, replace true
-				 * with IsolationUsesXactSnapshot().
+				 * TODO(read committed): If handling using EvalPlanQual for READ COMMITTED in future,
+				 * replace true with IsolationUsesXactSnapshot().
 				 */
 				if (true)
 				{

@@ -4089,10 +4089,16 @@ yb_is_restart_possible(const ErrorData* edata,
 	if (!is_read_restart_error && !is_conflict_error)
 	{
 		if (yb_debug_log_internal_restarts)
-			elog(LOG, "Restart isn't possible, code %d isn't a read restart/conflict error",
+			elog(LOG, "Restart isn't possible, code %d isn't a kReadRestart / kConflict error",
 			          edata->yb_txn_errcode);
 		return false;
 	}
+
+	// if (is_read_restart_error) {
+	// 	if (yb_debug_log_internal_restarts)
+	// 		elog(LOG, "Read Restart blocked for testing attempt no (%d)", attempt);
+	// 	return false;
+	// }
 
 	/*
 	 * In case of READ COMMITTED, retries for kConflict are performed indefinitely until statement
@@ -4371,28 +4377,6 @@ yb_restart_portal(const char* portal_name)
 	PortalStart(portal, portal->portalParams, 0 /* eflags */, InvalidSnapshot);
 
 	/* no need to call PortalSetResultFormat either - formats array is already set */
-}
-
-static long
-yb_get_sleep_usecs_on_txn_conflict(int attempt) {
-	/* Use exponential backoff to calculate the sleep duration. */
-	if (!*YBCGetGFlags()->ysql_sleep_before_retry_on_txn_conflict)
-		return 0;
-
-	/*
-	 * While the guc variables are being changed, RetryMaxBackoffMsecs can be
-	 * smaller than RetryMinBackoffMsecs. Return RetryMaxBackoffMsecs in this
-	 * case.
-	 */
-	if (RetryMaxBackoffMsecs <= RetryMinBackoffMsecs)
-		return RetryMaxBackoffMsecs;
-
-	if (RetryMaxBackoffMsecs == 0 || RetryMinBackoffMsecs == 0)
-		return 0;
-
-	return (long) (PowerWithUpperLimit(RetryBackoffMultiplier, attempt,
-				1.0 * RetryMaxBackoffMsecs / RetryMinBackoffMsecs) *
-			RetryMinBackoffMsecs * 1000);
 }
 
 /*

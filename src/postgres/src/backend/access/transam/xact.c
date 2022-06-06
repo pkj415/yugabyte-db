@@ -4547,7 +4547,8 @@ BeginInternalSubTransactionForReadCommittedStatement() {
 
 	Assert(s->blockState == TBLOCK_SUBINPROGRESS ||
 				 s->blockState == TBLOCK_IMPLICIT_INPROGRESS ||
-				 s->blockState == TBLOCK_INPROGRESS);
+				 s->blockState == TBLOCK_INPROGRESS ||
+				 s->blockState == TBLOCK_STARTED);
 
 	if (IsInParallelMode())
 		ereport(ERROR,

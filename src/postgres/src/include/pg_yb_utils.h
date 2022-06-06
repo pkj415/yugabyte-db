@@ -637,5 +637,6 @@ bool YBCIsRegionLocal(Relation rel);
  * after tablet splitting.
  */
 extern Datum yb_get_range_split_clause(PG_FUNCTION_ARGS);
+long yb_get_sleep_usecs_on_txn_conflict(int attempt);
 
 #endif /* PG_YB_UTILS_H */

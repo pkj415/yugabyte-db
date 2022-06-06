@@ -194,7 +194,7 @@ permutation "updateforss" "readforss" "c1" "c2"
 permutation "updateforcip" "updateforcip2" "c1" "c2" "read_a"
 permutation "updateforcip" "updateforcip3" "c1" "c2" "read_a"
 permutation "wrtwcte" "readwcte" "c1" "c2"
-# TODO(Piyush): The below is commented out because explain gives a different plan on YB for unknown
-# reason. Once that is fixed, the below test can be enabled.
+# TODO(read committed): The below is commented out because explain gives a different plan on YB for
+# unknown reason. Once that is fixed, the below test can be enabled.
 # permutation "wrjt" "selectjoinforupdate" "c2" "c1"
 permutation "wrtwcte" "multireadwcte" "c1" "c2"
