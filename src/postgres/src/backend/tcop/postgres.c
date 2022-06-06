@@ -4068,7 +4068,8 @@ static bool
 yb_is_restart_possible(const ErrorData* edata,
 					   int attempt,
 					   const YBQueryRestartData* restart_data,
-						 bool* retries_exhausted)
+						 bool* retries_exhausted,
+						 bool* rc_ignoring_ddl_statement)
 {
 	if (!IsYugaByteEnabled())
 	{
@@ -4174,9 +4175,18 @@ yb_is_restart_possible(const ErrorData* edata,
 	bool is_read = strncmp(command_tag, "SELECT", 6) == 0;
 	bool is_dml  = YBIsDmlCommandTag(command_tag);
 
-	if (!(is_read || is_dml))
+	if (IsYBReadCommitted())
 	{
-		// As of now, we only support retries with SELECT/UPDATE/INSERT/DELETE. There are other
+		if (YBGetDdlNestingLevel() != 0) {
+			if (yb_debug_log_internal_restarts)
+				elog(LOG, "READ COMMITTED retry semantics don't support DDLs");
+			*rc_ignoring_ddl_statement = true;
+			return false;
+		}
+	}
+	else if (!(is_read || is_dml))
+	{
+		// if !read committed, we only support retries with SELECT/UPDATE/INSERT/DELETE. There are other
 		// statements that might result in a kReadRestart/kConflict like CREATE INDEX. We don't retry
 		// those as of now.
 		if (yb_debug_log_internal_restarts)
@@ -4359,28 +4369,6 @@ yb_restart_portal(const char* portal_name)
 	/* no need to call PortalSetResultFormat either - formats array is already set */
 }
 
-static long
-yb_get_sleep_usecs_on_txn_conflict(int attempt) {
-	/* Use exponential backoff to calculate the sleep duration. */
-	if (!*YBCGetGFlags()->ysql_sleep_before_retry_on_txn_conflict)
-		return 0;
-
-	/*
-	 * While the guc variables are being changed, RetryMaxBackoffMsecs can be
-	 * smaller than RetryMinBackoffMsecs. Return RetryMaxBackoffMsecs in this
-	 * case.
-	 */
-	if (RetryMaxBackoffMsecs <= RetryMinBackoffMsecs)
-		return RetryMaxBackoffMsecs;
-
-	if (RetryMaxBackoffMsecs == 0 || RetryMinBackoffMsecs == 0)
-		return 0;
-
-	return (long) (PowerWithUpperLimit(RetryBackoffMultiplier, attempt,
-				1.0 * RetryMaxBackoffMsecs / RetryMinBackoffMsecs) *
-			RetryMinBackoffMsecs * 1000);
-}
-
 /*
  * Process an error that happened during execution with expected read restart
  * errors. Prepares the re-execution if an error is restartable, otherwise -
@@ -4398,8 +4386,10 @@ yb_attempt_to_restart_on_error(int attempt,
 	MemoryContext error_context = MemoryContextSwitchTo(exec_context);
 	ErrorData*    edata         = CopyErrorData();
 	bool					retries_exhausted = false;
+	bool rc_ignoring_ddl_statement = false;
 
-	if (yb_is_restart_possible(edata, attempt, restart_data, &retries_exhausted)) {
+	if (yb_is_restart_possible(
+					edata, attempt, restart_data, &retries_exhausted, &rc_ignoring_ddl_statement)) {
 		if (yb_debug_log_internal_restarts)
 		{
 			ereport(LOG,
@@ -4458,6 +4448,7 @@ yb_attempt_to_restart_on_error(int attempt,
 				ResourceOwnerNewParent(portal->resowner, NULL);
 			}
 
+			// TODO(read committed): remove this once the feature is GA
 			Assert(strcmp(GetCurrentTransactionName(), YB_READ_COMMITTED_INTERNAL_SUB_TXN_NAME) == 0);
 			RollbackAndReleaseCurrentSubTransaction();
 			BeginInternalSubTransactionForReadCommittedStatement();
@@ -4529,10 +4520,18 @@ yb_attempt_to_restart_on_error(int attempt,
 		}
 	} else {
 		/* if we shouldn't restart - propagate the error */
+
+		if (rc_ignoring_ddl_statement) {
+			edata->message = psprintf(
+				"%s. %s", "Read Committed txn can proceed because of error in DDL", edata->message);
+			ReThrowError(edata);
+		}
+
 		if (retries_exhausted) {
 			edata->message = psprintf("%s. %s", "All transparent retries exhausted", edata->message);
 			ReThrowError(edata);
 		}
+
 		MemoryContextSwitchTo(error_context);
 		PG_RE_THROW();
 	}

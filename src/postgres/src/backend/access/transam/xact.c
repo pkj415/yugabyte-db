@@ -2954,8 +2954,6 @@ StartTransactionCommandInternal(bool yb_skip_read_committed_handling)
 				 * READ COMMITTED isolation level.
 				 */
 				s->ybDataSentForCurrQuery = false;
-				HandleYBStatus(YBCPgResetTransactionReadPoint());
-				elog(DEBUG2, "Resetting read point for statement in Read Committed txn");
 
 				/*
 				 * Create a new internal sub txn before any execution. This aids in rolling back any changes
@@ -4546,7 +4544,8 @@ BeginInternalSubTransactionForReadCommittedStatement() {
 
 	Assert(s->blockState == TBLOCK_SUBINPROGRESS ||
 				 s->blockState == TBLOCK_IMPLICIT_INPROGRESS ||
-				 s->blockState == TBLOCK_INPROGRESS);
+				 s->blockState == TBLOCK_INPROGRESS ||
+				 s->blockState == TBLOCK_STARTED);
 
 	if (IsInParallelMode())
 		ereport(ERROR,

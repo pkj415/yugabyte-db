@@ -574,13 +574,20 @@ init_execution_state(List *queryTree_list,
 	 * Note: don't set setsResult if the function returns VOID, as evidenced
 	 * by not having made a junkfilter.  This ensures we'll throw away any
 	 * output from the last statement in such a function.
+	 *
+	 * YSQL: Lazy eval is not supported in READ COMMITTED because later executions
+	 * of a lazily evaluated query requires switching back to the snapshot (i.e.,
+	 * read point) that was picked in the earlier execution of the query.
+	 * Currently, READ COMMITTED only supports using a new snapshot at the start
+	 * of a query, it doesn't support switching back to an existing snapshot.
 	 */
 	if (lasttages && fcache->junkFilter)
 	{
 		lasttages->setsResult = true;
 		if (lazyEvalOK &&
 			lasttages->stmt->commandType == CMD_SELECT &&
-			!lasttages->stmt->hasModifyingCTE)
+			!lasttages->stmt->hasModifyingCTE &&
+			!IsYBReadCommitted())
 			fcache->lazyEval = lasttages->lazyEval = true;
 	}
 
@@ -988,6 +995,271 @@ postquel_get_single_result(TupleTableSlot *slot,
 	return value;
 }
 
+static void
+fmgr_sql_execute_statement_internal(execution_state **es, bool *pushed_snapshot,
+																		SQLFunctionCachePtr fcache,
+																		int yb_rc_retry_attempt_num)
+{
+	Assert(*es);
+
+	/*
+	 * For a retry, the snapshot should have been removed to allow usage of a new
+	 * one.
+	 *
+	 * Also, a retry is not expected to occur in the following situations (reasons
+	 * explained in detial in fmgr_sql:
+	 *  (i) Lazy functions
+	 *  (ii) Read only functions
+	 *  (iii) DDL statements
+	 */
+	if(yb_rc_retry_attempt_num != 0)
+	{
+		Assert(!*pushed_snapshot &&
+					 !fcache->lazyEval &&
+					 !fcache->readonly_func &&
+					 YBGetDdlNestingLevel() == 0);
+	}
+
+	while (*es)
+	{
+		bool		completed;
+
+		if ((*es)->status == F_EXEC_START)
+		{
+			/*
+			 * If not read-only, be sure to advance the command counter for
+			 * each command, so that all work to date in this transaction is
+			 * visible.  Take a new snapshot if we don't have one yet,
+			 * otherwise just bump the command ID in the existing snapshot.
+			 */
+			if (!fcache->readonly_func)
+			{
+				CommandCounterIncrement();
+				if (!*pushed_snapshot)
+				{
+					PushActiveSnapshot(GetTransactionSnapshot());
+					*pushed_snapshot = true;
+				}
+				else
+				{
+					UpdateActiveSnapshotCommandId();
+				}
+			}
+
+			postquel_start(*es, fcache);
+		}
+		else if (!fcache->readonly_func && !*pushed_snapshot)
+		{
+			/*
+			 * We can reach here only if the function was lazily evaluated earlier.
+			 *
+			 * This can't happen if using READ COMMITTED isolation in YSQL since we
+			 * disable lazy evaluation in YSQL's READ COMMITTED isolation.
+			 */
+			Assert(!IsYBReadCommitted());
+
+			/* Re-establish active snapshot when re-entering function */
+			PushActiveSnapshot((*es)->qd->snapshot);
+			*pushed_snapshot = true;
+		}
+
+		completed = postquel_getnext(*es, fcache);
+
+		/*
+		 * If we ran the command to completion, we can shut it down now. Any
+		 * row(s) we need to return are safely stashed in the tuplestore, and
+		 * we want to be sure that, for example, AFTER triggers get fired
+		 * before we return anything.  Also, if the function doesn't return
+		 * set, we can shut it down anyway because it must be a SELECT and we
+		 * don't care about fetching any more result rows.
+		 */
+		if (completed || !fcache->returnsSet)
+			postquel_end(*es);
+
+		/*
+		 * Break from loop if we didn't shut down (implying we got a
+		 * lazily-evaluated row).  Otherwise we'll press on till the whole
+		 * function is done, relying on the tuplestore to keep hold of the
+		 * data to eventually be returned.  This is necessary since an
+		 * INSERT/UPDATE/DELETE RETURNING that sets the result might be
+		 * followed by additional rule-inserted commands, and we want to
+		 * finish doing all those commands before we return anything.
+		 */
+		if ((*es)->status != F_EXEC_DONE)
+			return;
+
+		/*
+		 * Advance to next execution_state, which might be in the next list.
+		 */
+		*es = (*es)->next;
+	}
+}
+
+static void yb_read_committed_retry_log_and_throw_error(char *msg,
+																												ErrorData* edata,
+																												MemoryContext error_context)
+{
+	if (yb_debug_log_internal_restarts)
+		elog(LOG, "%s", msg);
+
+	edata->message = psprintf("%s. (%s)", edata->message, msg);
+	edata->yb_txn_errcode = YBCGetTxnNoneErrorCode();
+	MemoryContextSwitchTo(error_context);
+	ReThrowError(edata);
+}
+
+static void
+yb_sql_func_statement_attempt_to_restart_on_error(int attempt,
+																									MemoryContext old_context,
+																									SQLFunctionCachePtr fcache,
+																									execution_state **es,
+																									execution_state *es_at_query_boundary,
+																									bool *pushed_snapshot)
+{
+	/* Switch the context back to the original one */
+	MemoryContext error_context = MemoryContextSwitchTo(old_context);
+	ErrorData*    edata         = CopyErrorData();
+
+	if (yb_debug_log_internal_restarts)
+		elog(
+				LOG, "[SQL func/proc] Error details: edata->message=%s edata->filename=%s "
+				" edata->lineno=%d", edata->message, edata->filename, edata->lineno);
+
+	bool is_read_restart_error = YBCIsRestartReadError(edata->yb_txn_errcode);
+	bool is_conflict_error     = YBCIsTxnConflictError(edata->yb_txn_errcode);
+	if (!is_read_restart_error && !is_conflict_error)
+	{
+		char *msg = psprintf("[SQL func/proc]: Can't retry, code %d isn't a read "
+				"restart/ conflict error", edata->yb_txn_errcode);
+		yb_read_committed_retry_log_and_throw_error(msg, edata, error_context);
+		pfree(msg);
+	}
+
+	if (!IsYBReadCommitted())
+	{
+		yb_read_committed_retry_log_and_throw_error(
+				"[SQL func/proc]: Use READ COMMITTED isolation to avoid read restart/ "
+				"conflict  errors", edata, error_context);
+	}
+
+	if (fcache->lazyEval)
+	{
+		yb_read_committed_retry_log_and_throw_error(
+				"[SQL func/proc]: Illegal state - lazy evalaution is not supported in "
+				"READ COMMITTED isolation.", edata, error_context);
+	}
+
+	if (YBGetDdlNestingLevel() != 0)
+	{
+		yb_read_committed_retry_log_and_throw_error(
+				"[SQL func/proc]: Can't retry DDLs", edata, error_context);
+	}
+
+	if (fcache->readonly_func)
+	{
+		/* A conflict can't occur in a read only function. */
+		Assert(is_read_restart_error);
+
+		/*
+		 * If this was a read only function, it would have used the surrounding
+		 * query's snapshot (i.e., read point). In this case YSQL can restart only
+		 * the whole function and not just a statement because all statements of the
+		 * read only function should use the same snapshot.
+		 */
+		 yb_read_committed_retry_log_and_throw_error(
+				"[SQL func/proc]: Can't retry statement in a read only function", edata,
+				error_context);
+	}
+
+	if (yb_debug_log_internal_restarts)
+		elog(
+				LOG, "Restarting statement due to kReadRestart/kConflict error: %s, "
+				"attempt No: %d", edata->message, attempt);
+
+	/*
+	 * If we hit a kReadRestart or a kConflict, something was executed for sure.
+	 * But the es could be NULL if we executed all execution_state's for the query
+	 * but hadn't flushed the buffered ops (and faced the conflict when flushing).
+	 */
+	if (*es)
+	{
+		/*
+		 * If we didn't execute till the end, the query descriptor and its estate
+		 * might still be present. Clean those up.
+		 */
+		if ((*es)->qd)
+		{
+			EState *estate = (*es)->qd->estate;
+			if (estate)
+			{
+				/* Below is a selective copy-paste of standard_ExecutorEnd() */
+
+				/* Switch into per-query memory context to run ExecEndPlan */
+				MemoryContext old_context2 = MemoryContextSwitchTo(estate->es_query_cxt);
+
+				YbExecEndPlan((*es)->qd->planstate, estate);
+
+				/* do away with our snapshots */
+				UnregisterSnapshot(estate->es_snapshot);
+				UnregisterSnapshot(estate->es_crosscheck_snapshot);
+
+				/* Must switch out of context before destroying it */
+				MemoryContextSwitchTo(old_context2);
+
+				/*
+				 * Release EState and per-query memory context.  This should release
+				 * everything the executor has allocated.
+				 */
+				FreeExecutorState(estate);
+				(*es)->qd->estate = NULL;
+			}
+
+			(*es)->qd->dest->rDestroy((*es)->qd->dest);
+			FreeQueryDesc((*es)->qd);
+			(*es)->qd = NULL;
+		}
+	}
+
+	/* Start execution again at query boundary */
+	execution_state *es_to_reset = es_at_query_boundary;
+
+	while (es_to_reset)
+	{
+		es_to_reset->status = F_EXEC_START;
+		Assert(es_to_reset->qd == NULL);
+		es_to_reset = es_to_reset->next;
+	}
+
+	/* Cleanup tuples any tuples stored by the statement in the tuple store */
+	tuplestore_clear(fcache->tstore);
+	PopActiveSnapshot();
+	*pushed_snapshot = false;
+
+	RollbackAndReleaseCurrentSubTransaction();
+	if (YBCIsRestartReadError(edata->yb_txn_errcode))
+	{
+		/*
+		 * TODO(Piyush): ensure we don't reset the read manipulation state once we
+		 * set this.
+		 */
+		HandleYBStatus(YBCPgRestartReadPoint());
+	}
+	else if (YBCIsTxnConflictError(edata->yb_txn_errcode))
+	{
+		pg_usleep(yb_get_sleep_usecs_on_txn_conflict(attempt));
+	}
+	else
+	{
+		/* We shouldn't really be able to reach here */
+		yb_read_committed_retry_log_and_throw_error(
+			"Illegal state in SQL function/ procedure retries.", edata,
+			error_context);
+	}
+
+	/* Cleanup the error */
+	FlushErrorState();
+}
+
 /*
  * fmgr_sql: function call manager for SQL functions
  */
@@ -1001,6 +1273,7 @@ fmgr_sql(PG_FUNCTION_ARGS)
 	bool		lazyEvalOK;
 	bool		is_first;
 	bool		pushed_snapshot;
+	bool starts_at_query_boundary;
 	execution_state *es;
 	TupleTableSlot *slot;
 	Datum		result;
@@ -1081,13 +1354,16 @@ fmgr_sql(PG_FUNCTION_ARGS)
 	eslist = fcache->func_state;
 	es = NULL;
 	is_first = true;
+
 	foreach(eslc, eslist)
 	{
+		starts_at_query_boundary = true;
 		es = (execution_state *) lfirst(eslc);
 
 		while (es && es->status == F_EXEC_DONE)
 		{
 			is_first = false;
+			starts_at_query_boundary = false;
 			es = es->next;
 		}
 
@@ -1128,68 +1404,89 @@ fmgr_sql(PG_FUNCTION_ARGS)
 	 * snapshot is on the active stack and we can just bump its command ID.
 	 */
 	pushed_snapshot = false;
+	int yb_rc_retry_attempt_num = 0;
 	while (es)
 	{
-		bool		completed;
+		if (yb_debug_log_internal_restarts)
+			elog(LOG, "SQL func execution attempt number %d for %s",
+					 yb_rc_retry_attempt_num, fcache->pinfo->fname);
 
-		if (es->status == F_EXEC_START)
+		MemoryContext old_context = GetCurrentMemoryContext();
+		execution_state *es_at_query_boundary = NULL;
+		bool was_lazyily_evaluated = false;
+		PG_TRY();
 		{
-			/*
-			 * If not read-only, be sure to advance the command counter for
-			 * each command, so that all work to date in this transaction is
-			 * visible.  Take a new snapshot if we don't have one yet,
-			 * otherwise just bump the command ID in the existing snapshot.
-			 */
-			if (!fcache->readonly_func)
+			if (!fcache->lazyEval)
 			{
-				CommandCounterIncrement();
-				if (!pushed_snapshot)
-				{
-					PushActiveSnapshot(GetTransactionSnapshot());
-					pushed_snapshot = true;
-				}
-				else
-					UpdateActiveSnapshotCommandId();
+				Assert(starts_at_query_boundary);
+				es_at_query_boundary = es;
 			}
 
-			postquel_start(es, fcache);
+			if (IsYBReadCommitted() && !fcache->lazyEval && !fcache->readonly_func &&
+					YBGetDdlNestingLevel() == 0)
+			{
+				/*
+				 * Reason for various checks when retrying execution in READ COMMITTED
+				 * isolation level:
+				 *
+				 * (1) !fcache->lazyEval:
+				 *   we can't retry lazily executed functions because if they had
+				 *	 already returned some rows to the caller, and current execution
+				 *   results in say a conflict, a retry would require using a new
+				 *   snapshot to avoid the conflict. But that breaks semantics since
+				 *   each statement is supposed to use the same snapshot till it completes.
+				 *
+				 * (2) !fcache->readonly_func:
+				 *   Read only functions use the snapshot of the surrounding query.
+				 *   Restarting such a query would require using a snapshot so that the
+				 *   error doesn't occur again. But oeprating on a different snapshot
+				 *   would break the guarantee that the read only func and surrounding
+				 *   query use the same snapshot.
+				 *
+				 * (3) YBGetDdlNestingLevel == 0:
+				 *   Conflicts in DDL can't be handled right now for READ COMMITTED
+				 *   isolation level.
+				 */
+				BeginInternalSubTransactionForReadCommittedStatement();
+			}
+
+			fmgr_sql_execute_statement_internal(
+					&es, &pushed_snapshot, fcache, yb_rc_retry_attempt_num);
+			if (IsYBReadCommitted() && !fcache->lazyEval && !fcache->readonly_func &&
+					YBGetDdlNestingLevel() == 0)
+			{
+				/*
+				 * Flush buffered ops so that we retry for an errors that might occur in
+				 * the not-yet-flushed ops.
+				 */
+				YBFlushBufferedOperations();
+				ReleaseCurrentSubTransaction();
+			}
+
+			if (es)
+			{
+				/*
+				 * A lazy evaluated row was found, stop execution now and restart in
+				 * next invocation of the function.
+				 */
+				was_lazyily_evaluated = true;
+				starts_at_query_boundary = false;
+			}
 		}
-		else if (!fcache->readonly_func && !pushed_snapshot)
+		PG_CATCH();
 		{
-			/* Re-establish active snapshot when re-entering function */
-			PushActiveSnapshot(es->qd->snapshot);
-			pushed_snapshot = true;
+			YBResetOperationsBuffering();
+			yb_sql_func_statement_attempt_to_restart_on_error(
+				yb_rc_retry_attempt_num, old_context, fcache,
+				&es, es_at_query_boundary, &pushed_snapshot);
+			es = es_at_query_boundary;
+			yb_rc_retry_attempt_num++;
 		}
+		PG_END_TRY();
 
-		completed = postquel_getnext(es, fcache);
+		if (was_lazyily_evaluated)
+			 break;
 
-		/*
-		 * If we ran the command to completion, we can shut it down now. Any
-		 * row(s) we need to return are safely stashed in the tuplestore, and
-		 * we want to be sure that, for example, AFTER triggers get fired
-		 * before we return anything.  Also, if the function doesn't return
-		 * set, we can shut it down anyway because it must be a SELECT and we
-		 * don't care about fetching any more result rows.
-		 */
-		if (completed || !fcache->returnsSet)
-			postquel_end(es);
-
-		/*
-		 * Break from loop if we didn't shut down (implying we got a
-		 * lazily-evaluated row).  Otherwise we'll press on till the whole
-		 * function is done, relying on the tuplestore to keep hold of the
-		 * data to eventually be returned.  This is necessary since an
-		 * INSERT/UPDATE/DELETE RETURNING that sets the result might be
-		 * followed by additional rule-inserted commands, and we want to
-		 * finish doing all those commands before we return anything.
-		 */
-		if (es->status != F_EXEC_DONE)
-			break;
-
-		/*
-		 * Advance to next execution_state, which might be in the next list.
-		 */
-		es = es->next;
 		while (!es)
 		{
 			eslc = lnext(eslc);
@@ -1209,6 +1506,8 @@ fmgr_sql(PG_FUNCTION_ARGS)
 				PopActiveSnapshot();
 				pushed_snapshot = false;
 			}
+			starts_at_query_boundary = true;
+			yb_rc_retry_attempt_num = 0;
 		}
 	}
 

@@ -112,7 +112,7 @@ public class TestPgTransparentRestarts extends BasePgSQLTest {
   public void tearDown() throws Exception {
     try (Statement stmt = connection.createStatement()) {
       LOG.info("Dropping table test_rr");
-      stmt.execute("DROP TABLE test_rr;");
+      stmt.execute("DROP TABLE test_rr CASCADE;");
     }
   }
 
@@ -313,6 +313,26 @@ public class TestPgTransparentRestarts extends BasePgSQLTest {
         return stmt;
       };
     }.runTest();
+  }
+
+  /**
+   * ReadRestart error isn't retried transparently in READ ONLY SQL functions (see functions.c
+   * for reason).
+   *
+   * TODO(read committed): fix test.
+   */
+  @Test
+  public void selectStarShortInSqlFunc() throws Exception {
+    try (Statement stmt = connection.createStatement()) {
+      stmt.execute("CREATE FUNCTION func() RETURNS setof test_rr AS " +
+                   "$$ SELECT * FROM test_rr LIMIT 10 $$ LANGUAGE SQL");
+    }
+    new RegularStatementTester(
+        getConnectionBuilder(),
+        "SELECT func()",
+        getShortString(),
+        true /* expectRestartErrors */
+    ).runTest();
   }
 
   /**

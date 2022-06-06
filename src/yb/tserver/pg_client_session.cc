@@ -604,10 +604,12 @@ void PgClientSession::ProcessReadTimeManipulation(ReadTimeManipulation manipulat
   switch (manipulation) {
     case ReadTimeManipulation::RESET: {
         // If a txn_ has been created, session_->read_point() returns the read point stored in txn_.
-        ConsistentReadPoint* rp = Session(PgClientSessionKind::kPlain)->read_point();
-        rp->SetCurrentReadTime();
+        if (Session(PgClientSessionKind::kPlain)) {
+          ConsistentReadPoint* rp = Session(PgClientSessionKind::kPlain)->read_point();
+          rp->SetCurrentReadTime();
 
-        VLOG(1) << "Setting current ht as read point " << rp->GetReadTime();
+          VLOG(1) << "Setting current ht as read point " << rp->GetReadTime();
+        }
       }
       return;
     case ReadTimeManipulation::RESTART: {

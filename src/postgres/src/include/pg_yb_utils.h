@@ -609,4 +609,6 @@ void YbRegisterSysTableForPrefetching(int sys_table_id);
  */
 bool YBCIsRegionLocal(Relation rel);
 
+long yb_get_sleep_usecs_on_txn_conflict(int attempt);
+
 #endif /* PG_YB_UTILS_H */

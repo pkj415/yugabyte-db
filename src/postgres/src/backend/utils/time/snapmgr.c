@@ -368,6 +368,17 @@ GetTransactionSnapshot(void)
 
 	CurrentSnapshot = GetSnapshotData(&CurrentSnapshotData);
 
+	/*
+	 * We have to RESET read point in YSQL for READ COMMITTED isolation level.
+	 * A read point is analogous to the snapshot in PostgreSQL.
+	 *
+	 * We need to flush all earlier operations so that they complete on the
+	 * previous snapshot.
+	 */
+	elog(DEBUG2, "Resetting read point for statement in Read Committed txn");
+	HandleYBStatus(YBCPgFlushBufferedOperations());
+	HandleYBStatus(YBCPgResetTransactionReadPoint());
+
 	return CurrentSnapshot;
 }
 

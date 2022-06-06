@@ -285,6 +285,10 @@ uint16_t YBCGetTxnConflictErrorCode() {
   return to_underlying(TransactionErrorCode::kConflict);
 }
 
+uint16_t YBCGetTxnNoneErrorCode() {
+  return to_underlying(TransactionErrorCode::kNone);
+}
+
 YBCStatus YBCInit(const char* argv0,
                   YBCPAllocFn palloc_fn,
                   YBCCStringToTextWithLenFn cstring_to_text_with_len_fn) {

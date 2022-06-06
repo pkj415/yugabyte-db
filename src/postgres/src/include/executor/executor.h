@@ -217,6 +217,7 @@ extern void EvalPlanQualSetTuple(EPQState *epqstate, Index rti,
 extern HeapTuple EvalPlanQualGetTuple(EPQState *epqstate, Index rti);
 
 #define EvalPlanQualSetSlot(epqstate, slot)  ((epqstate)->origslot = (slot))
+void YbExecEndPlan(PlanState *planstate, EState *estate);
 extern void EvalPlanQualFetchRowMarks(EPQState *epqstate);
 extern TupleTableSlot *EvalPlanQualNext(EPQState *epqstate);
 extern void EvalPlanQualBegin(EPQState *epqstate, EState *parentestate);

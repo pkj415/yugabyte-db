@@ -68,6 +68,7 @@
 #include "common/pg_yb_common.h"
 #include "lib/stringinfo.h"
 #include "optimizer/cost.h"
+#include "storage/proc.h"
 #include "tcop/utility.h"
 #include "utils/builtins.h"
 #include "utils/datum.h"
@@ -2315,4 +2316,26 @@ bool YBCIsRegionLocal(Relation rel) {
 			!IsSystemRelation(rel) &&
 			get_yb_tablespace_cost(rel->rd_rel->reltablespace, &cost) &&
 			cost <= yb_interzone_cost;
+}
+
+long
+yb_get_sleep_usecs_on_txn_conflict(int attempt) {
+	/* Use exponential backoff to calculate the sleep duration. */
+	if (!*YBCGetGFlags()->ysql_sleep_before_retry_on_txn_conflict)
+		return 0;
+
+	/*
+	 * While the guc variables are being changed, RetryMaxBackoffMsecs can be
+	 * smaller than RetryMinBackoffMsecs. Return RetryMaxBackoffMsecs in this
+	 * case.
+	 */
+	if (RetryMaxBackoffMsecs <= RetryMinBackoffMsecs)
+		return RetryMaxBackoffMsecs;
+
+	if (RetryMaxBackoffMsecs == 0 || RetryMinBackoffMsecs == 0)
+		return 0;
+
+	return (long) (PowerWithUpperLimit(RetryBackoffMultiplier, attempt,
+				1.0 * RetryMaxBackoffMsecs / RetryMinBackoffMsecs) *
+			RetryMinBackoffMsecs * 1000);
 }

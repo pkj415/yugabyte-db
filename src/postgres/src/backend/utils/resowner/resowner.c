@@ -1036,8 +1036,8 @@ ResourceOwnerForgetRelationRef(ResourceOwner owner, Relation rel)
 static void
 PrintRelCacheLeakWarning(Relation rel)
 {
-	elog(WARNING, "relcache reference leak: relation \"%s\" not closed",
-		 RelationGetRelationName(rel));
+	elog(WARNING, "relcache reference leak: relation \"%s\" not closed %s",
+		 RelationGetRelationName(rel), YBCGetStackTrace());
 }
 
 /*

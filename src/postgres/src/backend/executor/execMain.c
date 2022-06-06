@@ -1669,6 +1669,11 @@ ExecEndPlan(PlanState *planstate, EState *estate)
 	}
 }
 
+void YbExecEndPlan(PlanState *planstate, EState *estate)
+{
+	ExecEndPlan(planstate, estate);
+}
+
 /* ----------------------------------------------------------------
  *		ExecutePlan
  *

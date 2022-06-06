@@ -272,7 +272,6 @@ ConsistentReadPoint* YBSession::BatcherConfig::read_point() const {
   return transaction ? &transaction->read_point() : non_transactional_read_point.get();
 }
 
-
 ConsistentReadPoint* YBSession::read_point() {
   return batcher_config_.read_point();
 }
