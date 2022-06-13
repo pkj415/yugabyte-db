@@ -161,7 +161,7 @@ class YBTransaction : public std::enable_shared_from_this<YBTransaction> {
 
   void SetActiveSubTransaction(SubTransactionId id);
 
-  Status RollbackSubTransaction(SubTransactionId id);
+  Status RollbackToSubTransaction(SubTransactionId id, CoarseTimePoint deadline);
 
   bool HasSubTransactionState();
 
@@ -178,9 +178,13 @@ class YBSubTransaction {
 
   void SetActiveSubTransaction(SubTransactionId id);
 
-  Status RollbackSubTransaction(SubTransactionId id);
+  Status RollbackToSubTransaction(SubTransactionId id);
 
   const SubTransactionMetadata& get();
+
+  std::string ToString() const;
+
+  SubTransactionId GetHighestSubtransactionId() const { return highest_subtransaction_id_; }
 
  private:
   SubTransactionMetadata sub_txn_;

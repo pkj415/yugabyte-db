@@ -476,7 +476,7 @@ bool YBCPgHasWriteOperationsInDdlTxnMode();
 YBCStatus YBCPgExitSeparateDdlTxnMode();
 void YBCPgClearSeparateDdlTxnMode();
 YBCStatus YBCPgSetActiveSubTransaction(uint32_t id);
-YBCStatus YBCPgRollbackSubTransaction(uint32_t id);
+YBCStatus YBCPgRollbackToSubTransaction(uint32_t id);
 
 // System validation -------------------------------------------------------------------------------
 // Validate placement information

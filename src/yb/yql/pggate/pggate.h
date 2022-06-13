@@ -528,7 +528,7 @@ class PgApiImpl {
   Status ExitSeparateDdlTxnMode();
   void ClearSeparateDdlTxnMode();
   Status SetActiveSubTransaction(SubTransactionId id);
-  Status RollbackSubTransaction(SubTransactionId id);
+  Status RollbackToSubTransaction(SubTransactionId id);
 
   //------------------------------------------------------------------------------------------------
   // Expressions.
