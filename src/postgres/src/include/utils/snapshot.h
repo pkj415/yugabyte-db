@@ -112,6 +112,7 @@ typedef struct SnapshotData
 
 	TimestampTz whenTaken;		/* timestamp when snapshot was taken */
 	XLogRecPtr	lsn;			/* position in the WAL stream when taken */
+	void* yb_consistent_read_point; /* YSQL specific field */
 } SnapshotData;
 
 /*

@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <atomic>
 #include <functional>
+#include <stack>
 #include <string>
 #include <utility>
 
@@ -668,6 +669,10 @@ YBCStatus YBCPgStopOperationsBuffering() {
 
 void YBCPgResetOperationsBuffering() {
   pgapi->ResetOperationsBuffering();
+}
+
+void* YBCGetLatestSnapshot() {
+  return pgapi->GetLatestSnapshot();
 }
 
 YBCStatus YBCPgFlushBufferedOperations() {

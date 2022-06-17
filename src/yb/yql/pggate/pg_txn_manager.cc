@@ -436,6 +436,13 @@ void PgTxnManager::SetupPerformOptions(tserver::PgPerformOptionsPB* options) {
   }
 }
 
+std::shared_ptr<ConsistentReadPoint> PgTxnManager::GetLatestSnapshot() {
+  std::shared_ptr<ConsistentReadPoint> consistent_read_point =
+    std::make_shared<ConsistentReadPoint>(clock_);
+  consistent_read_point->SetCurrentReadTime();
+  return consistent_read_point;
+}
+
 uint64 PgTxnManager::GetClockNow() {
   return clock_->Now().ToUint64();
 }

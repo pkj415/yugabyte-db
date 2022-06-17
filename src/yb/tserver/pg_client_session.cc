@@ -660,6 +660,9 @@ PgClientSession::SetupSession(const PgPerformRequestPB& req, CoarseTimePoint dea
     ProcessReadTimeManipulation(options.read_time_manipulation());
     if (options.has_read_time() &&
         (options.read_time().has_read_ht() || options.use_catalog_session())) {
+      if (options.has_read_time() && options.read_time().has_read_ht())
+        LOG(INFO) << "piyush - pg_client_session got read_time as " << options.read_time().ShortDebugString();
+
       const auto read_time = options.read_time().has_read_ht()
           ? ReadHybridTime::FromPB(options.read_time()) : ReadHybridTime();
       session->SetReadPoint(read_time);

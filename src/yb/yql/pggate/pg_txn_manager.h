@@ -80,6 +80,7 @@ class PgTxnManager : public RefCountedThreadSafe<PgTxnManager> {
   bool ShouldUseFollowerReads() const { return read_time_for_follower_reads_.is_valid(); }
 
   void SetupPerformOptions(tserver::PgPerformOptionsPB* options);
+  std::shared_ptr<ConsistentReadPoint> GetLatestSnapshot();
   uint64 GetClockNow();
 
  private:
@@ -116,6 +117,7 @@ class PgTxnManager : public RefCountedThreadSafe<PgTxnManager> {
   bool enable_follower_reads_ = false;
   uint64_t follower_read_staleness_ms_ = 0;
   HybridTime read_time_for_follower_reads_;
+  ConsistentReadPoint read_point_;
   bool deferrable_ = false;
 
   bool ddl_mode_ = false;
