@@ -2215,3 +2215,9 @@ RestoreTransactionSnapshot(Snapshot snapshot, void *master_pgproc)
 {
 	SetTransactionSnapshot(snapshot, NULL, InvalidPid, master_pgproc);
 }
+
+Snapshot
+GetCurrentSnapshot()
+{
+	return CurrentSnapshot;
+}

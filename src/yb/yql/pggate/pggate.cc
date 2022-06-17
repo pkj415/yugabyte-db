@@ -1249,6 +1249,12 @@ void PgApiImpl::ResetOperationsBuffering() {
   pg_session_->ResetOperationsBuffering();
 }
 
+ConsistentReadPoint* PgApiImpl::GetLatestSnapshot() {
+  std::shared_ptr<ConsistentReadPoint> consistent_read_point = pg_txn_manager_->GetLatestSnapshot();
+  snapshots.push_back(consistent_read_point);
+  return consistent_read_point.get();
+}
+
 Status PgApiImpl::FlushBufferedOperations() {
   return pg_session_->FlushBufferedOperations();
 }

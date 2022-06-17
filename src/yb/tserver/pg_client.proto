@@ -70,16 +70,19 @@ service PgClientService {
 
 message PgHeartbeatRequestPB {
   uint64 session_id = 1;
+  fixed64 propagated_hybrid_time = 2;
 }
 
 message PgHeartbeatResponsePB {
   AppStatusPB status = 1;
   uint64 session_id = 2;
+  fixed64 propagated_hybrid_time = 3;
 }
 
 message PgObjectIdPB {
   uint32 database_oid = 1;
   uint32 object_oid = 2;
+  fixed64 propagated_hybrid_time = 3;
 }
 
 message PgAlterDatabaseRequestPB {
@@ -87,29 +90,35 @@ message PgAlterDatabaseRequestPB {
   string database_name = 2;
   uint32 database_oid = 3;
   string new_name = 4;
+  fixed64 propagated_hybrid_time = 5;
 }
 
 message PgAlterDatabaseResponsePB {
   AppStatusPB status = 1;
+  fixed64 propagated_hybrid_time = 2;
 }
 
 message PgBackfillIndexRequestPB {
   uint64 session_id = 1;
   PgObjectIdPB table_id = 2;
+  fixed64 propagated_hybrid_time = 3;
 }
 
 message PgBackfillIndexResponsePB {
   AppStatusPB status = 1;
+  fixed64 propagated_hybrid_time = 2;
 }
 
 message PgRenameColumnPB {
   string old_name = 1;
   string new_name = 2;
+  fixed64 propagated_hybrid_time = 3;
 }
 
 message PgRenameTablePB {
   string database_name = 1;
   string table_name = 2;
+  fixed64 propagated_hybrid_time = 3;
 }
 
 message PgAlterTableRequestPB {
@@ -120,10 +129,12 @@ message PgAlterTableRequestPB {
   repeated PgRenameColumnPB rename_columns = 5;
   repeated string drop_columns = 6;
   PgRenameTablePB rename_table = 7;
+  fixed64 propagated_hybrid_time = 8;
 }
 
 message PgAlterTableResponsePB {
   AppStatusPB status = 1;
+  fixed64 propagated_hybrid_time = 2;
 }
 
 message PgCreateDatabaseRequestPB {
@@ -134,17 +145,21 @@ message PgCreateDatabaseRequestPB {
   uint32 source_database_oid = 5;
   uint32 next_oid = 6;
   bool colocated = 7;
+  fixed64 propagated_hybrid_time = 8;
 }
 
 message PgCreateDatabaseResponsePB {
   AppStatusPB status = 1;
+  fixed64 propagated_hybrid_time = 2;
 }
 
 message PgCreateSequencesDataTableRequestPB {
+  fixed64 propagated_hybrid_time = 1;
 }
 
 message PgCreateSequencesDataTableResponsePB {
   AppStatusPB status = 1;
+  fixed64 propagated_hybrid_time = 2;
 }
 
 message PgCreateColumnPB {
@@ -155,10 +170,12 @@ message PgCreateColumnPB {
   bool is_range = 5;
   int32 sorting_type = 6;
   int32 attr_pgoid = 7;
+  fixed64 propagated_hybrid_time = 8;
 }
 
 message PgCreateSplitBoundaryPB {
   repeated QLValuePB values = 1;
+  fixed64 propagated_hybrid_time = 2;
 }
 
 message PgCreateTableRequestPB {
@@ -194,10 +211,12 @@ message PgCreateTableRequestPB {
   bool is_matview = 21;
   PgObjectIdPB matview_pg_table_oid = 18;
   string schema_name = 19;
+  fixed64 propagated_hybrid_time = 20;
 }
 
 message PgCreateTableResponsePB {
   AppStatusPB status = 1;
+  fixed64 propagated_hybrid_time = 2;
 }
 
 message PgCreateTablegroupRequestPB {
@@ -207,80 +226,97 @@ message PgCreateTablegroupRequestPB {
 
   PgObjectIdPB tablegroup_id = 3;
   PgObjectIdPB tablespace_id = 4;
+  fixed64 propagated_hybrid_time = 5;
 }
 
 message PgCreateTablegroupResponsePB {
   AppStatusPB status = 1;
+  fixed64 propagated_hybrid_time = 2;
 }
 
 message PgDropDatabaseRequestPB {
   uint64 session_id = 1;
   string database_name = 3;
   uint32 database_oid = 4;
+  fixed64 propagated_hybrid_time = 5;
 }
 
 message PgDropDatabaseResponsePB {
   AppStatusPB status = 1;
+  fixed64 propagated_hybrid_time = 2;
 }
 
 message PgDropTableRequestPB {
   uint64 session_id = 1;
   PgObjectIdPB table_id = 2;
   bool index = 3;
+  fixed64 propagated_hybrid_time = 4;
 }
 
 message PgDropTableResponsePB {
   AppStatusPB status = 1;
   master.TableIdentifierPB indexed_table = 2;
+  fixed64 propagated_hybrid_time = 3;
 }
 
 message PgDropTablegroupRequestPB {
   uint64 session_id = 1;
   PgObjectIdPB tablegroup_id = 2;
+  fixed64 propagated_hybrid_time = 3;
 }
 
 message PgDropTablegroupResponsePB {
   AppStatusPB status = 1;
+  fixed64 propagated_hybrid_time = 2;
 }
 
 message PgGetCatalogMasterVersionRequestPB {
+  fixed64 propagated_hybrid_time = 1;
 }
 
 message PgFinishTransactionRequestPB {
   uint64 session_id = 1;
   bool commit = 2;
   bool ddl_mode = 3;
+  fixed64 propagated_hybrid_time = 4;
 }
 
 message PgFinishTransactionResponsePB {
   AppStatusPB status = 1;
+  fixed64 propagated_hybrid_time = 2;
 }
 
 message PgGetCatalogMasterVersionResponsePB {
   AppStatusPB status = 1;
   uint64 version = 2;
+  fixed64 propagated_hybrid_time = 3;
 }
 
 message PgGetDatabaseInfoRequestPB {
   uint32 oid = 1;
+  fixed64 propagated_hybrid_time = 2;
 }
 
 message PgGetDatabaseInfoResponsePB {
   AppStatusPB status = 1;
 
   master.GetNamespaceInfoResponsePB info = 2;
+  fixed64 propagated_hybrid_time = 3;
 }
 
 message PgIsInitDbDoneRequestPB {
+  fixed64 propagated_hybrid_time = 1;
 }
 
 message PgIsInitDbDoneResponsePB {
   AppStatusPB status = 1;
   bool done = 2;
+  fixed64 propagated_hybrid_time = 3;
 }
 
 message PgListLiveTabletServersRequestPB {
   bool primary_only = 1;
+  fixed64 propagated_hybrid_time = 2;
 }
 
 message PgLiveTabletServerPB {
@@ -293,22 +329,26 @@ message PgLiveTabletServerPB {
   bool is_primary = 7;
   string public_ip = 8;
   uint32 pg_port = 9;
+  fixed64 propagated_hybrid_time = 10;
 }
 
 message PgListLiveTabletServersResponsePB {
   AppStatusPB status = 1;
   repeated PgLiveTabletServerPB servers = 2;
+  fixed64 propagated_hybrid_time = 3;
 }
 
 message PgOpenTableRequestPB {
   string table_id = 1;
   bool reopen = 2;
   fixed64 invalidate_cache_time_us = 3;
+  fixed64 propagated_hybrid_time = 4;
 }
 
 message PgTablePartitionsPB {
   uint32 version = 1;
   repeated bytes keys = 2;
+  fixed64 propagated_hybrid_time = 3;
 }
 
 message PgOpenTableResponsePB {
@@ -316,6 +356,7 @@ message PgOpenTableResponsePB {
 
   master.GetTableSchemaResponsePB info = 2;
   PgTablePartitionsPB partitions = 3;
+  fixed64 propagated_hybrid_time = 4;
 }
 
 message PgPerformOpPB {
@@ -324,6 +365,7 @@ message PgPerformOpPB {
     PgsqlReadRequestPB read = 2;
   }
   bool read_from_followers = 3;
+  fixed64 propagated_hybrid_time = 4;
 }
 
 enum ReadTimeManipulation {
@@ -347,6 +389,7 @@ message PgPerformOptionsPB {
   ReadHybridTimePB read_time = 11;
   bool use_catalog_session = 12;
   bool force_global_transaction = 13;
+  fixed64 propagated_hybrid_time = 14;
 }
 
 message PgPerformRequestPB {
@@ -354,18 +397,21 @@ message PgPerformRequestPB {
   PgPerformOptionsPB options = 2;
   repeated PgPerformOpPB ops = 3;
   fixed64 write_time = 4;
+  fixed64 propagated_hybrid_time = 5;
 }
 
 message PgPerformResponsePB {
   AppStatusPB status = 1;
   repeated PgsqlResponsePB responses = 2;
   ReadHybridTimePB catalog_read_time = 3;
+  fixed64 propagated_hybrid_time = 4;
 }
 
 message PgReserveOidsRequestPB {
   uint32 database_oid = 1;
   uint32 next_oid = 2;
   uint32 count = 3;
+  fixed64 propagated_hybrid_time = 4;
 }
 
 message PgReserveOidsResponsePB {
@@ -373,15 +419,18 @@ message PgReserveOidsResponsePB {
 
   uint32 begin_oid = 2;
   uint32 end_oid = 3;
+  fixed64 propagated_hybrid_time = 4;
 }
 
 message PgRollbackToSubTransactionRequestPB {
   uint64 session_id = 1;
   uint32 sub_transaction_id = 2;
+  fixed64 propagated_hybrid_time = 3;
 }
 
 message PgRollbackToSubTransactionResponsePB {
   AppStatusPB status = 1;
+  fixed64 propagated_hybrid_time = 2;
 }
 
 message PgSetActiveSubTransactionRequestPB {
@@ -389,28 +438,34 @@ message PgSetActiveSubTransactionRequestPB {
   uint32 sub_transaction_id = 2;
   // Used to create transaction when we did not have one yet.
   PgPerformOptionsPB options = 3;
+  fixed64 propagated_hybrid_time = 4;
 }
 
 message PgSetActiveSubTransactionResponsePB {
   AppStatusPB status = 1;
+  fixed64 propagated_hybrid_time = 2;
 }
 
 message PgTabletServerCountRequestPB {
   bool primary_only = 1;
+  fixed64 propagated_hybrid_time = 2;
 }
 
 message PgTabletServerCountResponsePB {
   AppStatusPB status = 1;
   int32 count = 2;
+  fixed64 propagated_hybrid_time = 3;
 }
 
 message PgTruncateTableRequestPB {
   uint64 session_id = 1;
   PgObjectIdPB table_id = 2;
+  fixed64 propagated_hybrid_time = 3;
 }
 
 message PgTruncateTableResponsePB {
   AppStatusPB status = 1;
+  fixed64 propagated_hybrid_time = 2;
 }
 
 message PgPlacementInfoPB {
@@ -419,16 +474,19 @@ message PgPlacementInfoPB {
   string zone = 3;
   int32 min_num_replicas = 4;
   int32 leader_preference = 5;
+  fixed64 propagated_hybrid_time = 6;
 }
 
 message PgValidatePlacementRequestPB {
   uint64 session_id = 1;
   int32 num_replicas = 2;
   repeated PgPlacementInfoPB placement_infos = 3;
+  fixed64 propagated_hybrid_time = 4;
 }
 
 message PgValidatePlacementResponsePB {
   AppStatusPB status = 1;
+  fixed64 propagated_hybrid_time = 2;
 }
 
 message PgInsertSequenceTupleRequestPB {
@@ -438,10 +496,12 @@ message PgInsertSequenceTupleRequestPB {
   uint64 ysql_catalog_version = 4;
   int64 last_val = 5;
   bool is_called = 6;
+  fixed64 propagated_hybrid_time = 7;
 }
 
 message PgInsertSequenceTupleResponsePB {
   AppStatusPB status = 1;
+  fixed64 propagated_hybrid_time = 2;
 }
 
 message PgUpdateSequenceTupleRequestPB {
@@ -454,11 +514,13 @@ message PgUpdateSequenceTupleRequestPB {
   bool has_expected = 7;
   int64 expected_last_val = 8;
   bool expected_is_called = 9;
+  fixed64 propagated_hybrid_time = 10;
 }
 
 message PgUpdateSequenceTupleResponsePB {
   AppStatusPB status = 1;
   bool skipped = 2;
+  fixed64 propagated_hybrid_time = 3;
 }
 
 message PgReadSequenceTupleRequestPB {
@@ -466,36 +528,45 @@ message PgReadSequenceTupleRequestPB {
   int64 db_oid = 2;
   int64 seq_oid = 3;
   uint64 ysql_catalog_version = 4;
+  fixed64 propagated_hybrid_time = 5;
 }
 
 message PgReadSequenceTupleResponsePB {
   AppStatusPB status = 1;
   int64 last_val = 2;
   bool is_called = 3;
+  fixed64 propagated_hybrid_time = 6;
 }
 
 message PgDeleteSequenceTupleRequestPB {
   uint64 session_id = 1;
   int64 db_oid = 2;
   int64 seq_oid = 3;
+  fixed64 propagated_hybrid_time = 4;
 }
 
 message PgDeleteSequenceTupleResponsePB {
   AppStatusPB status = 1;
+  fixed64 propagated_hybrid_time = 2;
 }
 
 message PgDeleteDBSequencesRequestPB {
   uint64 session_id = 1;
   int64 db_oid = 2;
+  fixed64 propagated_hybrid_time = 3;
 }
 
 message PgDeleteDBSequencesResponsePB {
   AppStatusPB status = 1;
+  fixed64 propagated_hybrid_time = 2;
 }
 
-message PgCheckIfPitrActiveRequestPB {}
+message PgCheckIfPitrActiveRequestPB {
+  fixed64 propagated_hybrid_time = 1;
+}
 
 message PgCheckIfPitrActiveResponsePB {
   bool is_pitr_active = 1;
   AppStatusPB status = 2;
+  fixed64 propagated_hybrid_time = 3;
 }

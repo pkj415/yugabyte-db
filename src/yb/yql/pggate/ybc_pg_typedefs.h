@@ -300,6 +300,7 @@ typedef struct PgExecParameters {
   char *partition_key = NULL;
   PgExecOutParam *out_param = NULL;
   bool is_index_backfill = false;
+  void* consistent_read_point = NULL;
 #else
   uint64_t limit_count;
   uint64_t limit_offset;
@@ -312,6 +313,7 @@ typedef struct PgExecParameters {
   char *partition_key;
   PgExecOutParam *out_param;
   bool is_index_backfill;
+  void* consistent_read_point
 #endif
 } YBCPgExecParameters;
 

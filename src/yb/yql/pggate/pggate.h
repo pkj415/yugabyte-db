@@ -444,6 +444,7 @@ class PgApiImpl {
   Status StartOperationsBuffering();
   Status StopOperationsBuffering();
   void ResetOperationsBuffering();
+  ConsistentReadPoint* GetLatestSnapshot();
   Status FlushBufferedOperations();
 
   //------------------------------------------------------------------------------------------------
@@ -638,6 +639,7 @@ class PgApiImpl {
   scoped_refptr<PgSession> pg_session_;
   std::unique_ptr<PgSysTablePrefetcher> pg_sys_table_prefetcher_;
   std::unordered_set<std::unique_ptr<PgMemctx>, PgMemctxHasher, PgMemctxComparator> mem_contexts_;
+  std::vector<std::shared_ptr<ConsistentReadPoint>> snapshots;
 };
 
 }  // namespace pggate
