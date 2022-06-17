@@ -436,5 +436,9 @@ void PgTxnManager::SetupPerformOptions(tserver::PgPerformOptionsPB* options) {
   }
 }
 
+uint64 PgTxnManager::GetClockNow() {
+  return clock_->Now().ToUint64();
+}
+
 }  // namespace pggate
 }  // namespace yb

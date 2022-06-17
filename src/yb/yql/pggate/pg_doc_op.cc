@@ -356,7 +356,7 @@ Status PgDocOp::SendRequestImpl(bool force_non_bufferable) {
   size_t send_count = std::min(parallelism_level_, active_op_count_);
   response_ = VERIFY_RESULT(sender_(
       pg_session_.get(), pgsql_ops_.data(), send_count,
-      *table_, &GetReadTime(), force_non_bufferable));
+      *table_, GetInTxnLimit(), force_non_bufferable));
   return Status::OK();
 }
 
@@ -438,9 +438,8 @@ Result<std::list<PgDocResult>> PgDocOp::ProcessResponseResult(
   return result;
 }
 
-uint64_t& PgDocOp::GetReadTime() {
-  return (read_time_ || !exec_params_.statement_read_time)
-      ? read_time_ : *exec_params_.statement_read_time;
+uint64_t* PgDocOp::GetInTxnLimit() {
+  return exec_params_.statement_in_txn_limit;
 }
 
 Status PgDocOp::CreateRequests() {
@@ -467,9 +466,9 @@ Status PgDocOp::CompleteRequests() {
 
 Result<PgDocResponse> PgDocOp::DefaultSender(
     PgSession* session, const PgsqlOpPtr* ops, size_t ops_count, const PgTableDesc& table,
-    uint64_t* read_time, bool force_non_bufferable) {
+    uint64_t* in_txn_limit, bool force_non_bufferable) {
   return PgDocResponse(VERIFY_RESULT(
-      session->RunAsync(ops, ops_count, table, read_time, force_non_bufferable)));
+      session->RunAsync(ops, ops_count, table, in_txn_limit, force_non_bufferable)));
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -501,7 +500,7 @@ Status PgDocReadOp::ExecuteInit(const PgExecParameters *exec_params) {
   SetRequestPrefetchLimit();
   SetBackfillSpec();
   SetRowMark();
-  SetReadTime();
+  SetReadTimeForBackfill();
   return Status::OK();
 }
 
@@ -1036,10 +1035,13 @@ void PgDocReadOp::SetBackfillSpec() {
   }
 }
 
-void PgDocReadOp::SetReadTime() {
+void PgDocReadOp::SetReadTimeForBackfill() {
   if (exec_params_.is_index_backfill) {
     read_op_->read_request().set_is_for_backfill(true);
-    read_op_->set_read_time(ReadHybridTime::FromUint64(GetReadTime()));
+    if (!exec_params_.backfill_read_time) {
+      exec_params_.backfill_read_time = pg_session_->GetClockNow();
+    }
+    read_op_->set_read_time(ReadHybridTime::FromUint64(exec_params_.backfill_read_time));
   }
 }
 

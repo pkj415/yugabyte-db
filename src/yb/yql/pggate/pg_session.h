@@ -318,6 +318,7 @@ class PgSession : public RefCountedThreadSafe<PgSession> {
   bool HasWriteOperationsInDdlMode() const;
 
   Result<bool> CheckIfPitrActive();
+  uint64 GetClockNow();
 
  private:
   Result<PerformFuture> FlushOperations(

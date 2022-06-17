@@ -80,6 +80,7 @@ class PgTxnManager : public RefCountedThreadSafe<PgTxnManager> {
   bool ShouldUseFollowerReads() const { return read_time_for_follower_reads_.is_valid(); }
 
   void SetupPerformOptions(tserver::PgPerformOptionsPB* options);
+  uint64 GetClockNow();
 
  private:
   YB_STRONGLY_TYPED_BOOL(NeedsHigherPriorityTxn);

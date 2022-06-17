@@ -178,7 +178,7 @@ CreateExecutorState(void)
 	 * by the first read operation invoked for this query, and all later
 	 * reads performed by this query will not read any data written past this time.
 	 */
-	estate->yb_es_read_ht = 0;
+	estate->yb_es_in_txn_limit_ht = 0;
 
 	estate->yb_exec_params.limit_count = 0;
 	estate->yb_exec_params.limit_offset = 0;
@@ -186,12 +186,12 @@ CreateExecutorState(void)
 	estate->yb_exec_params.rowmark = -1;
 	estate->yb_exec_params.is_index_backfill = false;
 	/*
-	 * Pointer to the query read hybrid time. This pointer is passed
+	 * Pointer to the query's in txn limit. This pointer is passed
 	 * down to all the DocDB read operations invoked for this query. Only
 	 * the first read operation initializes its value, and all the other
 	 * operations ensure that they don't read any value written past this time.
 	 */
-	estate->yb_exec_params.statement_read_time = &estate->yb_es_read_ht;
+	estate->yb_exec_params.statement_in_txn_limit = &estate->yb_es_in_txn_limit_ht;
 
 	return estate;
 }

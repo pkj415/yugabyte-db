@@ -295,7 +295,7 @@ class PgDocOp : public std::enable_shared_from_this<PgDocOp> {
   const PgTable& table() const { return table_; }
 
  protected:
-  uint64_t& GetReadTime();
+  uint64_t* GetInTxnLimit();
 
   // Populate Protobuf requests using the collected information for this DocDB operator.
   virtual Result<bool> DoCreateRequests() = 0;
@@ -328,8 +328,6 @@ class PgDocOp : public std::enable_shared_from_this<PgDocOp> {
   // Process the result set in server response.
   Result<std::list<PgDocResult>> ProcessResponseResult(const rpc::CallResponsePtr& response);
 
-  void SetReadTime();
-
  private:
   Status SendRequest(bool force_non_bufferable);
 
@@ -345,16 +343,12 @@ class PgDocOp : public std::enable_shared_from_this<PgDocOp> {
 
   static Result<PgDocResponse> DefaultSender(
       PgSession* session, const PgsqlOpPtr* ops, size_t ops_count, const PgTableDesc& table,
-      uint64_t* read_time, bool force_non_bufferable);
+      uint64_t* in_txn_limit, bool force_non_bufferable);
 
   //----------------------------------- Data Members -----------------------------------------------
  protected:
   // Session control.
   PgSession::ScopedRefPtr pg_session_;
-
-  // Operation time. This time is set at the start and must stay the same for the lifetime of the
-  // operation to ensure that it is operating on one snapshot.
-  uint64_t read_time_ = 0;
 
   // Target table.
   PgTable& table_;
@@ -474,6 +468,7 @@ class PgDocReadOp : public PgDocOp {
   }
 
   Status DoPopulateDmlByYbctidOps(const YbctidGenerator& generator) override;
+  void SetReadTimeForBackfill();
 
  private:
   // Create protobuf requests using template_op_.
