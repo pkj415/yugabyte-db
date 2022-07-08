@@ -791,7 +791,8 @@ class TransactionState {
     first_entry_raft_index_ = data.op_id.index;
 
     // TODO(savepoints) -- consider swapping instead of copying here.
-    aborted_ = data.state.aborted();
+    if (!data.state.aborted().set().empty())
+      aborted_ = data.state.aborted();
 
     return Status::OK();
   }
