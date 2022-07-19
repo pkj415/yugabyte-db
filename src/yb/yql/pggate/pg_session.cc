@@ -59,6 +59,8 @@
 #include "yb/yql/pggate/pggate_flags.h"
 #include "yb/yql/pggate/ybc_pggate.h"
 
+#include "yb/util/debug-util.h"
+
 using namespace std::literals;
 
 DEFINE_int32(ysql_wait_until_index_permissions_timeout_ms, 60 * 60 * 1000, // 60 min.
@@ -194,19 +196,19 @@ bool IsReadOnly(const PgsqlOp& op) {
 
 class PgSession::RunHelper {
  public:
-  RunHelper(PgSession* pg_session, SessionType session_type)
-      : pg_session_(*pg_session), session_type_(session_type) {
+  RunHelper(
+      PgSession* pg_session, SessionType session_type,
+      uint64_t* read_time, bool force_non_bufferable)
+      : pg_session_(*pg_session), session_type_(session_type), read_time_(read_time),
+        force_non_bufferable_(force_non_bufferable) {
   }
 
-  Status Apply(const PgTableDesc& table,
-                       const PgsqlOpPtr& op,
-                       uint64_t* read_time,
-                       bool force_non_bufferable) {
+  Status Apply(const PgTableDesc& table, const PgsqlOpPtr& op) {
     auto& buffer = pg_session_.buffer_;
     // Try buffering this operation if it is a write operation, buffering is enabled and no
     // operations have been already applied to current session (yb session does not exist).
     if (operations_.empty() && pg_session_.buffering_enabled_ &&
-        !force_non_bufferable && op->is_write()) {
+        !force_non_bufferable_ && op->is_write()) {
         if (PREDICT_FALSE(yb_debug_log_docdb_requests)) {
           LOG(INFO) << "Buffering operation: " << op->ToString();
         }
@@ -225,7 +227,7 @@ class PgSession::RunHelper {
       // Buffered operations must be flushed independently in this case.
       // Also operations for catalog session can be combined with buffered operations
       // as catalog session is used for read-only operations.
-      if ((IsTransactional() && read_time && *read_time) || IsCatalog()) {
+      if ((IsTransactional() && read_time_ && *read_time_) || IsCatalog()) {
         RETURN_NOT_OK(buffer.Flush());
       } else {
         operations_ = VERIFY_RESULT(buffer.FlushTake(table, *op, IsTransactional()));
@@ -251,16 +253,16 @@ class PgSession::RunHelper {
     read_only = read_only && !IsValidRowMarkType(row_mark_type);
 
     return pg_session_.pg_txn_manager_->CalculateIsolation(
-        read_only, txn_priority_requirement, read_time);
+        read_only, txn_priority_requirement, read_time_);
   }
 
-  Result<PerformFuture> Flush() {
+  Result<PerformFuture> Flush(bool cache_allowed) {
     if (operations_.empty()) {
       // All operations were buffered, no need to flush.
       return PerformFuture();
     }
 
-    return pg_session_.Perform(std::move(operations_), IsCatalog());
+    return pg_session_.Perform(std::move(operations_), IsCatalog(), cache_allowed);
   }
 
  private:
@@ -279,6 +281,8 @@ class PgSession::RunHelper {
   PgSession& pg_session_;
   const SessionType session_type_;
   BufferableOperations operations_;
+  uint64_t* read_time_;
+  const bool force_non_bufferable_;
 };
 
 //--------------------------------------------------------------------------------------------------
@@ -523,11 +527,14 @@ Result<PerformFuture> PgSession::FlushOperations(BufferableOperations ops, bool 
         false /* read_only */, txn_priority_requirement, &in_txn_limit));
   }
 
-  return Perform(std::move(ops), UseCatalogSession::kFalse);
+  return Perform(std::move(ops));
 }
 
 Result<PerformFuture> PgSession::Perform(
-    BufferableOperations ops, UseCatalogSession use_catalog_session) {
+    BufferableOperations ops, UseCatalogSession use_catalog_session, bool cache_allowed) {
+/*  if (cache_allowed) {
+    LOG(INFO) << "--MARKER-- sending request with cache " << GetStackTrace();
+  }*/
   DCHECK(!ops.empty());
   tserver::PgPerformOptionsPB options;
 
@@ -548,7 +555,7 @@ Result<PerformFuture> PgSession::Perform(
     global_transaction = !(*i)->is_region_local();
   }
   options.set_force_global_transaction(global_transaction);
-
+  options.set_cache_allowed(cache_allowed);
   auto promise = std::make_shared<std::promise<PerformResult>>();
 
   pg_client_.PerformAsync(&options, &ops.operations, [promise](const PerformResult& result) {
@@ -742,14 +749,17 @@ Status PgSession::ValidatePlacement(const string& placement_info) {
 }
 
 Result<PerformFuture> PgSession::RunAsync(
-  const OperationGenerator& generator, uint64_t* read_time, bool force_non_bufferable) {
+  const OperationGenerator& generator, uint64_t* read_time, bool force_non_bufferable, bool cache_allowed) {
   auto table_op = generator();
   SCHECK(table_op.operation, IllegalState, "Operation list must not be empty");
+  if (cache_allowed) {
+    RETURN_NOT_OK(buffer_.Flush());
+  }
   const auto* table = table_op.table;
   const auto* op = table_op.operation;
   const auto group_session_type = VERIFY_RESULT(GetRequiredSessionType(
       *pg_txn_manager_, *table, **op));
-  RunHelper runner(this, group_session_type);
+  RunHelper runner(this, group_session_type, read_time, force_non_bufferable);
   const auto ddl_mode = pg_txn_manager_->IsDdlMode();
   for (; table_op.operation; table_op = generator()) {
     table = table_op.table;
@@ -761,9 +771,9 @@ Result<PerformFuture> PgSession::RunAsync(
               IllegalState,
               "Operations on different sessions can't be mixed");
     has_write_ops_in_ddl_mode_ = has_write_ops_in_ddl_mode_ || (ddl_mode && !IsReadOnly(**op));
-    RETURN_NOT_OK(runner.Apply(*table, *op, read_time, force_non_bufferable));
+    RETURN_NOT_OK(runner.Apply(*table, *op));
   }
-  return runner.Flush();
+  return runner.Flush(cache_allowed);
 }
 
 Result<bool> PgSession::CheckIfPitrActive() {

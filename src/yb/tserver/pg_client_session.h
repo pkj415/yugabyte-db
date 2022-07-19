@@ -81,7 +81,7 @@ class PgClientSession : public std::enable_shared_from_this<PgClientSession> {
   PgClientSession(
       client::YBClient* client, const scoped_refptr<ClockBase>& clock,
       std::reference_wrapper<const TransactionPoolProvider> transaction_pool_provider,
-      PgTableCache* table_cache, uint64_t id);
+      PgTableCache* table_cache, PgResponseCache* response_cache, uint64_t id);
 
   uint64_t id() const;
 
@@ -128,6 +128,7 @@ class PgClientSession : public std::enable_shared_from_this<PgClientSession> {
   scoped_refptr<ClockBase> clock_;
   const TransactionPoolProvider& transaction_pool_provider_;
   PgTableCache& table_cache_;
+  PgResponseCache& response_cache_;
   const uint64_t id_;
 
   std::array<SessionData, kPgClientSessionKindMapSize> sessions_;

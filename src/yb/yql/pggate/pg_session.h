@@ -227,7 +227,7 @@ class PgSession : public RefCountedThreadSafe<PgSession> {
 
   Result<PerformFuture> RunAsync(
       const OperationGenerator& generator, uint64_t* read_time,
-      bool force_non_bufferable);
+      bool force_non_bufferable, bool cache_allowed = false);
 
   // Smart driver functions.
   // -------------
@@ -326,7 +326,7 @@ class PgSession : public RefCountedThreadSafe<PgSession> {
   class RunHelper;
 
   Result<PerformFuture> Perform(
-      BufferableOperations ops, UseCatalogSession use_catalog_session);
+      BufferableOperations ops, UseCatalogSession use_catalog_session = UseCatalogSession::kFalse, bool cache_allowed = false);
 
   PgClient& pg_client_;
 

@@ -39,6 +39,7 @@
 #include "yb/tserver/pg_client.pb.h"
 #include "yb/tserver/pg_create_table.h"
 #include "yb/tserver/pg_table_cache.h"
+#include "yb/tserver/pg_response_cache.h"
 
 #include "yb/util/logging.h"
 #include "yb/util/result.h"
@@ -303,19 +304,30 @@ struct PerformData {
   PgClientSessionOperations ops;
   PgTableCache* table_cache;
   PgClientSession::UsedReadTimePtr used_read_time;
+  std::optional<PgResponseCache::Setter> cache_setter;
 
   void FlushDone(client::FlushStatus* flush_status) {
     auto status = CombineErrorsToStatus(flush_status->errors, flush_status->status);
+    PgPerformResponsePB partial_response;
     if (status.ok()) {
-      status = ProcessResponse();
+      status = ProcessResponse(cache_setter ? &partial_response : nullptr);
     }
     if (!status.ok()) {
       StatusToPB(status, resp->mutable_status());
     }
+    if (cache_setter) {
+//      LOG(INFO) << "--MARKER-- response set " << resp->DebugString();
+      if (!status.ok()) {
+        cache_setter->SetFailure(status);
+      } else {
+        cache_setter->SetData(partial_response, ops);
+      }
+    }
     context.RespondSuccess();
   }
 
-  Status ProcessResponse() {
+ private:
+  Status ProcessResponse(PgPerformResponsePB* pr) {
     int idx = 0;
     for (const auto& op : ops) {
       const auto status = HandleResponse(session_id, *op, resp, used_read_time);
@@ -334,13 +346,22 @@ struct PerformData {
       }
       ++idx;
     }
+    if (pr) {
+      *pr = *resp;
+    }
     auto& responses = *resp->mutable_responses();
     responses.Reserve(narrow_cast<int>(ops.size()));
     for (const auto& op : ops) {
       auto& op_resp = *responses.Add();
-      op_resp.Swap(op->mutable_response());
+      if (pr) {
+        op_resp = op->response();
+      } else {
+        op_resp.Swap(op->mutable_response());
+      }
       if (op_resp.has_rows_data_sidecar()) {
-        op_resp.set_rows_data_sidecar(narrow_cast<int>(context.AddRpcSidecar(op->rows_data())));
+        auto idx = narrow_cast<int>(context.AddRpcSidecar(op->rows_data()));
+//        LOG(INFO) << "--MARKER-- set sidecar " << op->rows_data().size() << " hash " << op->rows_data().hash() << " for " << idx;
+        op_resp.set_rows_data_sidecar(idx);
       }
     }
 
@@ -361,11 +382,13 @@ client::YBSessionPtr CreateSession(
 PgClientSession::PgClientSession(
     client::YBClient* client, const scoped_refptr<ClockBase>& clock,
     std::reference_wrapper<const TransactionPoolProvider> transaction_pool_provider,
-    PgTableCache* table_cache, uint64_t id)
+    PgTableCache* table_cache, PgResponseCache* response_cache, uint64_t id)
     : client_(*client),
       clock_(clock),
       transaction_pool_provider_(transaction_pool_provider.get()),
-      table_cache_(*table_cache), id_(id) {
+      table_cache_(*table_cache),
+      response_cache_(*response_cache),
+      id_(id) {
 }
 
 uint64_t PgClientSession::id() const {
@@ -583,6 +606,21 @@ Status PgClientSession::FinishTransaction(
 
 Status PgClientSession::Perform(
     const PgPerformRequestPB& req, PgPerformResponsePB* resp, rpc::RpcContext* context) {
+  std::optional<PgResponseCache::Setter> setter;
+  if (req.options().cache_allowed()) {
+//    LOG(INFO) << "--MARKER-- Perform with cache: " << req.DebugString();
+    auto entry_accessor = response_cache_.GetEntry(req, context->GetClientDeadline());
+    if (std::holds_alternative<PgResponseCache::Getter>(entry_accessor)) {
+//      LOG(INFO) << "--MARKER-- getting allowed";
+      auto getter = std::get<PgResponseCache::Getter>(entry_accessor);
+      getter.Get(resp, context);
+      return Status::OK();
+    } else {
+//      LOG(INFO) << "--MARKER-- setting required";
+      setter = std::get<PgResponseCache::Setter>(entry_accessor);
+    }
+  }
+
   auto session_info = VERIFY_RESULT(SetupSession(req, context->GetClientDeadline()));
   auto* session = session_info.first;
   auto ops = VERIFY_RESULT(PrepareOperations(req, session, &table_cache_));
@@ -593,7 +631,8 @@ Status PgClientSession::Perform(
     .context = std::move(*context),
     .ops = std::move(ops),
     .table_cache = &table_cache_,
-    .used_read_time = session_info.second
+    .used_read_time = session_info.second,
+    .cache_setter = std::move(setter)
   });
   session->FlushAsync([data](client::FlushStatus* flush_status) {
     data->FlushDone(flush_status);

@@ -289,6 +289,14 @@ bool YbGetMasterCatalogVersionFromTable(uint64_t *version)
 		HandleYBStatus(YBCPgDmlAppendTarget(ybc_stmt, expr));
 	}
 
+	Oid atttypid = InvalidOid;
+	Oid attcollation = InvalidOid;
+	int32 atttypmod = 0;
+
+	YBCPgTypeAttrs type_attrs = { atttypmod };
+	YBCPgExpr expr = YBCNewColumnRef(ybc_stmt, YBTupleIdAttributeNumber, atttypid, attcollation, &type_attrs);
+	HandleYBStatus(YBCPgDmlAppendTarget(ybc_stmt, expr));
+
 	HandleYBStatus(YBCPgExecSelect(ybc_stmt, NULL /* exec_params */));
 
 	bool      has_data = false;

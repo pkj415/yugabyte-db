@@ -48,6 +48,7 @@
 #include "catalog/pg_database.h"
 #include "catalog/pg_db_role_setting.h"
 #include "catalog/pg_tablespace.h"
+#include "catalog/pg_yb_catalog_version.h"
 #include "catalog/pg_yb_tablegroup.h"
 #include "catalog/yb_catalog_version.h"
 #include "libpq/auth.h"
@@ -700,16 +701,19 @@ InitPostgresImpl(const char *in_dbname, Oid dboid, const char *username,
 		 * local t-server (#10821) because catalog version is a part of
 		 * key in such cache.
 		 */
-		YBCStartSysTablePrefetching();
+		YBCPgResetCatalogReadTime();
+		YBCStartSysTablePrefetching(yb_catalog_cache_version);
 		*yb_sys_table_prefetching_started = true;
 		YbRegisterSysTableForPrefetching(
-				AuthIdRelationId);        // pg_authid
+				YBCatalogVersionRelationId); // pg_yb_catalog_version
 		YbRegisterSysTableForPrefetching(
-				DatabaseRelationId);      // pg_database
+				AuthIdRelationId);           // pg_authid
 		YbRegisterSysTableForPrefetching(
-				DbRoleSettingRelationId); // pg_db_role_setting
+				DatabaseRelationId);         // pg_database
 		YbRegisterSysTableForPrefetching(
-				AuthMemRelationId);       // pg_auth_members
+				DbRoleSettingRelationId);    // pg_db_role_setting
+		YbRegisterSysTableForPrefetching(
+				AuthMemRelationId);          // pg_auth_members
 	}
 	/*
 	 * Load relcache entries for the shared system catalogs.  This must create
@@ -1148,6 +1152,9 @@ InitPostgres(const char *in_dbname, Oid dboid, const char *username,
 		InitPostgresImpl(
 			in_dbname, dboid, username, useroid, out_dbname, override_allow_connections,
 			&sys_table_prefetching_started);
+			if (sys_table_prefetching_started) {
+				yb_catalog_cache_version = YbGetMasterCatalogVersion();
+			}
 	}
 	PG_CATCH();
 	{

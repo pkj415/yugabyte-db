@@ -3671,9 +3671,10 @@ process_postgres_switches(int argc, char *argv[], GucContext ctx,
 #endif
 }
 
-static void YBPreloadRelCacheHelper()
+static void YBPreloadRelCacheHelper(uint64_t catalog_version)
 {
-	YBCStartSysTablePrefetching();
+	YBCPgResetCatalogReadTime();
+	YBCStartSysTablePrefetching(catalog_version);
 	PG_TRY();
 	{
 		YBPreloadRelCache();
@@ -3698,6 +3699,7 @@ static void YBPreloadRelCacheHelper()
  */
 static void YBRefreshCache()
 {
+	// YBC_LOG_INFO_STACK_TRACE("--MARKER-- YBRefreshCache");
 	/*
 	 * Check that we are not already inside a transaction or we might end up
 	 * leaking cache references for any open relations (i.e. relations in-use by
@@ -3738,7 +3740,7 @@ static void YBRefreshCache()
 	/* Clear and reload system catalog caches, including all callbacks. */
 	ResetCatalogCaches();
 	CallSystemCacheCallbacks();
-	YBPreloadRelCacheHelper();
+	YBPreloadRelCacheHelper(catalog_master_version);
 
 	/* Also invalidate the pggate cache. */
 	HandleYBStatus(YBCPgInvalidateCache());

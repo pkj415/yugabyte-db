@@ -60,6 +60,7 @@
 #include "catalog/pg_rewrite.h"
 #include "catalog/pg_trigger.h"
 #include "catalog/pg_type.h"
+#include "catalog/pg_yb_catalog_version.h"
 #include "catalog/catalog.h"
 #include "catalog/yb_catalog_version.h"
 #include "catalog/yb_type.h"
@@ -1141,7 +1142,6 @@ bool IsTransactionalDdlStatement(PlannedStmt *pstmt,
 		case T_CreateEnumStmt:
 		case T_CreateTableGroupStmt:
 		case T_CreateTableSpaceStmt:
-		case T_CreatedbStmt:
 		case T_DefineStmt: // CREATE OPERATOR/AGGREGATE/COLLATION/etc
 		case T_CommentStmt: // COMMENT (create new comment)
 		case T_DiscardStmt: // DISCARD ALL/SEQUENCES/TEMP affects only objects of current connection
@@ -1201,6 +1201,7 @@ bool IsTransactionalDdlStatement(PlannedStmt *pstmt,
 		case T_CreateTransformStmt:
 		case T_CreateTrigStmt:
 		case T_CreateUserMappingStmt:
+		case T_CreatedbStmt:
 		{
 			/*
 			 * Add objects that may reference/alter other objects so we need to increment the
@@ -2251,6 +2252,9 @@ void YbRegisterSysTableForPrefetching(int sys_table_id) {
 		case DbRoleSettingRelationId:                     // pg_db_role_setting
 			db_id = TemplateDbOid;
 			break;
+		case YBCatalogVersionRelationId:
+			db_id = TemplateDbOid;
+			break;           // pg_yb_catalog_version
 
 		// MyDb tables
 		case AccessMethodProcedureRelationId:             // pg_amproc
@@ -2296,7 +2300,8 @@ void YbRegisterSysTableForPrefetching(int sys_table_id) {
 		case CastRelationId:        switch_fallthrough(); // pg_cast
 		case IndexRelationId:       switch_fallthrough(); // pg_index
 		case PartitionedRelationId: switch_fallthrough(); // pg_partitioned_table
-		case ProcedureRelationId:   break;                // pg_proc
+		case ProcedureRelationId:   break;//switch_fallthrough(); // pg_proc
+//		case YBCatalogVersionRelationId: break;           // pg_yb_catalog_version
 
 		default:
 		{

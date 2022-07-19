@@ -81,7 +81,7 @@ TEST_F(PgCatalogPerfTest, YB_DISABLE_TEST_IN_TSAN(StartupRPCCount)) {
   const auto first_connect_rpc_count = ASSERT_RESULT(read_rpc_watcher_->Delta(connector));
   ASSERT_EQ(first_connect_rpc_count, 5);
   const auto subsequent_connect_rpc_count = ASSERT_RESULT(read_rpc_watcher_->Delta(connector));
-  ASSERT_EQ(subsequent_connect_rpc_count, 2);
+  ASSERT_EQ(subsequent_connect_rpc_count, 1);
 }
 
 // Test checks number of RPC in case of cache refresh without partitioned tables.
@@ -103,6 +103,23 @@ TEST_F(PgCatalogPerfTest, YB_DISABLE_TEST_IN_TSAN(CacheRefreshRPCCountWithPartit
   }
   const auto cache_refresh_rpc_count = ASSERT_RESULT(CacheRefreshRPCCount());
   ASSERT_EQ(cache_refresh_rpc_count, 7);
+}
+
+TEST_F(PgCatalogPerfTest, YB_DISABLE_TEST_IN_TSAN(MegaTest)) {
+  auto conn = ASSERT_RESULT(Connect());
+  ASSERT_OK(conn.Execute("CREATE TABLE t (r INT, v INT NOT NULL)"));
+  ASSERT_RESULT(conn.Fetch("SELECT * FROM t"));
+  std::vector<PGConn> conns;
+  for (int i = 0; i < 20; ++i) {
+    conns.push_back(ASSERT_RESULT(Connect()));
+    ASSERT_RESULT(conns.back().Fetch("SELECT * FROM t"));
+  }
+  ASSERT_OK(conn.Execute("ALTER TABLE t ADD COLUMN v1 INT NOT NULL"));
+  size_t id = 0;
+  for (auto& c : conns) {
+    ASSERT_NOK(c.ExecuteFormat("INSERT INTO t VALUES($0, 2)", ++id));
+    ASSERT_OK(c.ExecuteFormat("INSERT INTO t VALUES($0, 2, 3)", ++id));
+  }
 }
 
 } // namespace pgwrapper

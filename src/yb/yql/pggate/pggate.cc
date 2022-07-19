@@ -1709,11 +1709,11 @@ Status PgApiImpl::ValidatePlacement(const char *placement_info) {
   return pg_session_->ValidatePlacement(placement_info);
 }
 
-void PgApiImpl::StartSysTablePrefetching() {
+void PgApiImpl::StartSysTablePrefetching(uint64_t catalog_version) {
   if (pg_sys_table_prefetcher_) {
     DLOG(FATAL) << "Sys table prefetching was started already";
   }
-  pg_sys_table_prefetcher_.reset(new PgSysTablePrefetcher());
+  pg_sys_table_prefetcher_.reset(new PgSysTablePrefetcher(catalog_version));
 }
 
 void PgApiImpl::StopSysTablePrefetching() {

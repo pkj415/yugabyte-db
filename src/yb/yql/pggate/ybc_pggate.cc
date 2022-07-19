@@ -1191,8 +1191,8 @@ const void* YBCPgGetThreadLocalErrMsg() {
   return PgGetThreadLocalErrMsg();
 }
 
-void YBCStartSysTablePrefetching() {
-  pgapi->StartSysTablePrefetching();
+void YBCStartSysTablePrefetching(uint64_t catalog_version) {
+  pgapi->StartSysTablePrefetching(catalog_version);
 }
 
 void YBCStopSysTablePrefetching() {

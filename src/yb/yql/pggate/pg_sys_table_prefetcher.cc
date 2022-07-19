@@ -215,7 +215,7 @@ Result<PrefetchedDataHolder> GetDataWithTargetsCheck(
   return info.data;
 }
 
-void AddTargerColumn(LWPgsqlReadRequestPB* req, const PgColumn& column) {
+void AddTargetColumn(LWPgsqlReadRequestPB* req, const PgColumn& column) {
   const auto cid = column.id();
   auto* expr_pb = req->add_targets();
   expr_pb->set_column_id(cid);
@@ -235,8 +235,8 @@ class Loader {
   using ReadOperations = std::vector<std::shared_ptr<client::YBPgsqlReadOp>>;
 
  public:
-  Loader(PgSession* session, size_t estimated_size)
-      : session_(session), arena_(std::make_shared<Arena>()) {
+  Loader(PgSession* session, size_t estimated_size, uint64_t catalog_version)
+      : session_(session), arena_(std::make_shared<Arena>()), catalog_version_(catalog_version) {
     op_info_.reserve(estimated_size);
   }
 
@@ -258,11 +258,13 @@ class Loader {
     auto& info = op_info_.back();
     auto& req = info.ReadOperation().read_request();
     SetupPaging(&req);
+    CHECK(static_cast<long>(catalog_version_) > -100);
+    req.set_ysql_catalog_version(catalog_version_);
     PgTable target(table);
     auto ordered_columns = OrderColumns(target.columns());
     info.targets.reserve(ordered_columns.size());
     for (const auto& c : ordered_columns) {
-      AddTargerColumn(&req, *c);
+      AddTargetColumn(&req, *c);
       info.targets.push_back(c->id());
     }
     if (index) {
@@ -272,7 +274,7 @@ class Loader {
           auto& index_req = *req.mutable_index_request();
           index_req.dup_table_id(index->id().GetYbTableId());
           SetupPaging(&index_req);
-          AddTargerColumn(&index_req, c);
+          AddTargetColumn(&index_req, c);
           info.index_targets.push_back(c.id());
           break;
         }
@@ -295,7 +297,7 @@ class Loader {
             }
             return result;
           }),
-          nullptr /* read_time */, false /* force_non_bufferable */));
+          nullptr /* read_time */, false /* force_non_bufferable */, true /* cache_allowed */));
       auto call_resp = VERIFY_RESULT(response.Get());
       Status remove_predicate_status;
       ResultFunctorAdapter<bool, OperationInfo&> remove_predicate(
@@ -323,12 +325,17 @@ class Loader {
   PgSession* session_;
   std::vector<OperationInfo> op_info_;
   std::shared_ptr<Arena> arena_;
+  const uint64_t catalog_version_;
 };
 
 } // namespace
 
 class PgSysTablePrefetcher::Impl {
  public:
+  explicit Impl(uint64_t catalog_version)
+      : catalog_version_(catalog_version) {
+  }
+
   void Register(const PgObjectId& table_id, const PgObjectId& index_id) {
     VLOG(1) << "Register " << table_id << " " << index_id;
     if (data_.find(table_id) == data_.end()) {
@@ -355,7 +362,7 @@ class PgSysTablePrefetcher::Impl {
                                         [](const auto& item) { return item.first; });
       return PrefetchedDataHolder();
     }
-    Loader loader(session, registered_for_loading_.size());
+    Loader loader(session, registered_for_loading_.size(), catalog_version_);
     for (const auto& t : registered_for_loading_) {
       RETURN_NOT_OK(loader.Apply(t.first, t.second));
     }
@@ -364,13 +371,18 @@ class PgSysTablePrefetcher::Impl {
     return GetDataWithTargetsCheck(table_id, data_[table_id], read_req, index_check_required);
   }
 
+  uint64_t catalog_version() const {
+    return catalog_version_;
+  }
+
  private:
   std::unordered_map<PgObjectId, PgObjectId, PgObjectIdHash> registered_for_loading_;
   DataContainer data_;
+  const uint64_t catalog_version_;
 };
 
-PgSysTablePrefetcher::PgSysTablePrefetcher()
-    : impl_(new Impl()) {
+PgSysTablePrefetcher::PgSysTablePrefetcher(uint64_t catalog_version)
+    : impl_(new Impl(catalog_version)) {
 }
 
 PgSysTablePrefetcher::~PgSysTablePrefetcher() = default;
@@ -384,7 +396,7 @@ Result<PrefetchedDataHolder> PgSysTablePrefetcher::GetData(
   auto result = impl_->GetData(session, read_req, index_check_required);
   if (!result.ok()) {
     // Reset the state in case of failure to prevent using of incomplete data in future calls.
-    impl_.reset(new Impl());
+    impl_.reset(new Impl(impl_->catalog_version()));
   }
   return result;
 }

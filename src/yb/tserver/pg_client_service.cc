@@ -40,6 +40,7 @@
 #include "yb/tserver/pg_client_session.h"
 #include "yb/tserver/pg_create_table.h"
 #include "yb/tserver/pg_table_cache.h"
+#include "yb/tserver/pg_response_cache.h"
 
 #include "yb/util/net/net_util.h"
 #include "yb/util/result.h"
@@ -185,7 +186,7 @@ class PgClientServiceImpl::Impl {
 
     auto session_id = ++session_serial_no_;
     auto session = std::make_shared<LockablePgClientSession>(
-            &client(), clock_, transaction_pool_provider_, &table_cache_, session_id);
+        &client(), clock_, transaction_pool_provider_, &table_cache_, &response_cache_, session_id);
     resp->set_session_id(session_id);
 
     std::lock_guard<rw_spinlock> lock(mutex_);
@@ -459,6 +460,7 @@ class PgClientServiceImpl::Impl {
   std::atomic<int64_t> session_serial_no_{0};
 
   rpc::ScheduledTaskTracker check_expired_sessions_;
+  PgResponseCache response_cache_;
 };
 
 PgClientServiceImpl::PgClientServiceImpl(

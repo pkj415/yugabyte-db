@@ -347,6 +347,8 @@ message PgPerformOptionsPB {
   ReadHybridTimePB read_time = 11;
   bool use_catalog_session = 12;
   bool force_global_transaction = 13;
+  bool cache_allowed = 14;
+  uint64 ysql_catalog_version = 15;
 }
 
 message PgPerformRequestPB {

@@ -1732,6 +1732,7 @@ YBIsDBConnectionValid()
 void
 YBPreloadRelCache()
 {
+	// YBC_LOG_INFO_STACK_TRACE("--MARKER-- YBPreloadRelCache");
 	/*
 	 * During the cache loading process postgres reads the data from multiple sys tables.
 	 * It is reasonable to prefetch all these tables in one shot.

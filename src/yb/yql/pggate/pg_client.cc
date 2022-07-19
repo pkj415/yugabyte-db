@@ -341,7 +341,6 @@ class PgClient::Impl {
     data->operations = std::move(*operations);
     data->callback = callback;
     data->controller.set_invoke_callback_mode(rpc::InvokeCallbackMode::kReactorThread);
-
     proxy_->PerformAsync(req, &data->resp, SetupController(&data->controller), [data] {
       PerformResult result;
       result.status = data->controller.status();
