@@ -700,6 +700,10 @@ YBCStatus YBCPgDmlBindColumn(YBCPgStatement handle, int attr_num, YBCPgExpr attr
   return ToYBCStatus(pgapi->DmlBindColumn(handle, attr_num, attr_value));
 }
 
+void YBCDmlSetNewYbctid(YBCPgStatement handle, uint64_t new_ybctid) {
+  pgapi->SetNewYbctid(handle, YbctidAsSlice(new_ybctid));
+}
+
 YBCStatus YBCPgDmlAddRowUpperBound(YBCPgStatement handle,
                                     int n_col_values,
                                     YBCPgExpr *col_values,

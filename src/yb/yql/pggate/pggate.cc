@@ -1096,6 +1096,10 @@ Status PgApiImpl::DmlBindColumn(PgStatement *handle, int attr_num, PgExpr *attr_
   return down_cast<PgDml*>(handle)->BindColumn(attr_num, attr_value);
 }
 
+void PgApiImpl::SetNewYbctid(PgStatement *handle, const Slice&  new_ybctid) {
+  return down_cast<PgDelete*>(handle)->SetNewYbctid(new_ybctid);
+}
+
 Status PgApiImpl::DmlBindColumnCondBetween(PgStatement *handle, int attr_num,
                                            PgExpr *attr_value,
                                            bool start_inclusive,

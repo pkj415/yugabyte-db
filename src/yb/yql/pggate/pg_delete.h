@@ -41,6 +41,10 @@ class PgDelete : public PgDmlWrite {
     write_req_->set_is_delete_persist_needed(is_persist_needed);
   }
 
+  void SetNewYbctid(const Slice& ybctid) {
+    write_req_->dup_new_ybctid(ybctid);
+  }
+
  private:
   PgsqlWriteRequestPB::PgsqlStmtType stmt_type() const override {
     return PgsqlWriteRequestPB::PGSQL_DELETE;

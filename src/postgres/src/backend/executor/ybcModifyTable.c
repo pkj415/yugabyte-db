@@ -553,7 +553,7 @@ void YBCExecuteInsertIndexForDb(Oid dboid,
 }
 
 bool YBCExecuteDelete(Relation rel, TupleTableSlot *slot, EState *estate,
-					  ModifyTableState *mtstate, bool changingPart)
+					  ModifyTableState *mtstate, bool changingPart, Datum new_ybctid)
 {
 	TupleDesc		tupleDesc = RelationGetDescr(rel);
 	Oid				dboid = YBCGetDatabaseOid(rel);
@@ -564,6 +564,7 @@ bool YBCExecuteDelete(Relation rel, TupleTableSlot *slot, EState *estate,
 	Datum			ybctid;
 	ListCell	   *lc;
 
+	elog(LOG, "Piyush - calling YBCExecuteDelete()... ");
 	/* Create DELETE request. */
 	HandleYBStatus(YBCPgNewDelete(dboid,
 								  YbGetStorageRelid(rel),
@@ -584,6 +585,9 @@ bool YBCExecuteDelete(Relation rel, TupleTableSlot *slot, EState *estate,
 	}
 	else
 	{
+		// new_ybctid is valid only for single row updates where a pk is changed
+		// TODO(read committed): Check if this condition is valid
+		// Assert(!new_ybctid);
 		ybctid = YBCGetYBTupleIdFromSlot(slot);
 	}
 
@@ -598,6 +602,8 @@ bool YBCExecuteDelete(Relation rel, TupleTableSlot *slot, EState *estate,
 	YBCPgExpr ybctid_expr = YBCNewConstant(delete_stmt, BYTEAOID, InvalidOid, ybctid,
 										   false /* is_null */);
 	HandleYBStatus(YBCPgDmlBindColumn(delete_stmt, YBTupleIdAttributeNumber, ybctid_expr));
+	if (new_ybctid)
+		YBCDmlSetNewYbctid(delete_stmt, new_ybctid);
 
 	/* Delete row from foreign key cache */
 	YBCPgDeleteFromForeignKeyReferenceCache(relid, ybctid);
@@ -988,7 +994,10 @@ Oid YBCExecuteUpdateReplace(Relation rel,
 {
 	Assert(!mtstate->yb_mt_is_single_row_update_or_delete);
 
-	YBCExecuteDelete(rel, slot, estate, mtstate, false /* changingPart */);
+	YBCExecuteDelete(
+			rel, slot, estate, mtstate, false /* changingPart */,
+			YBCGetYBTupleIdFromTuple(
+					rel, tuple, RelationGetDescr(rel) /* new_ybctid */));
 
 	Oid tupleoid = YBCExecuteInsert(rel,
 									RelationGetDescr(rel),

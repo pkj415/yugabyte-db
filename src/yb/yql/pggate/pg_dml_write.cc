@@ -142,6 +142,7 @@ void PgDmlWrite::AllocWriteRequest() {
                                                 is_region_local_);
 
   write_req_ = std::shared_ptr<LWPgsqlWriteRequestPB>(write_op, &write_op->write_request());
+  LOG(INFO) << "Piyush - stmt_type()" << YBCGetStackTrace();
   write_req_->set_stmt_type(stmt_type());
   write_req_->set_client(YQL_CLIENT_PGSQL);
   write_req_->dup_table_id(table_id_.GetYbTableId());

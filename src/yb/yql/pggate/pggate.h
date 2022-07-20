@@ -379,6 +379,7 @@ class PgApiImpl {
   //     contain bind-variables (placeholders) and constants whose values can be updated for each
   //     execution of the same allocated statement.
   Status DmlBindColumn(YBCPgStatement handle, int attr_num, YBCPgExpr attr_value);
+  void SetNewYbctid(PgStatement *handle, const Slice& new_ybctid);
   Status DmlBindColumnCondBetween(YBCPgStatement handle,
                                   int attr_num,
                                   PgExpr *attr_value,

@@ -132,13 +132,17 @@ extern void YBCExecuteInsertIndexForDb(Oid dboid,
  * no row to delete. This can occur because we do not first perform a scan if
  * it is a single row op. 'changingPart' indicates if this delete is part of an
  * UPDATE operation on a partitioned table that moves a row from one partition
- * to anoter.
+ * to another.
+ *
+ * new_ybctid is used to specify the pk of the new row if this delete is part
+ * of an UPDATE statement that changes the pk.
  */
 extern bool YBCExecuteDelete(Relation rel,
 							 TupleTableSlot *slot,
 							 EState *estate,
 							 ModifyTableState *mtstate,
-							 bool changingPart);
+							 bool changingPart,
+							 Datum new_ybctid);
 /*
  * Delete a tuple (identified by index columns and base table ybctid) from an
  * index's backing YugaByte index table.

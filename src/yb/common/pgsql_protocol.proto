@@ -260,6 +260,9 @@ message PgsqlWriteRequestPB {
 
   // Used only in pg client.
   optional bytes partition_key = 22;
+
+  // Ybctid of new row that is written as part a pk UPDATE.
+  optional bytes new_ybctid = 23;
 }
 
 //--------------------------------------------------------------------------------------------------

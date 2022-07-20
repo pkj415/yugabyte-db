@@ -338,6 +338,7 @@ YBCStatus YbPgDmlAppendColumnRef(YBCPgStatement handle, YBCPgExpr colref);
 //   The index-scan will use the bind to find base-ybctid which is then use to read data from
 //   the main-table, and therefore the bind-arguments are not associated with columns in main table.
 YBCStatus YBCPgDmlBindColumn(YBCPgStatement handle, int attr_num, YBCPgExpr attr_value);
+void YBCDmlSetNewYbctid(YBCPgStatement handle, uint64_t new_ybctid);
 YBCStatus YBCPgDmlBindColumnCondBetween(YBCPgStatement handle, int attr_num,
                                         YBCPgExpr attr_value,
                                         bool start_inclusive,

@@ -790,8 +790,12 @@ ExecDelete(ModifyTableState *mtstate,
 	}
 	else if (IsYBRelation(resultRelationDesc))
 	{
+		/*
+		 * new_ybctid is used to specify the pk of the new row if this delete is
+		 * part of an UPDATE statement that changes the pk.
+		 */
 		bool row_found = YBCExecuteDelete(resultRelationDesc, planSlot, estate,
-										  mtstate, changingPart);
+										  mtstate, changingPart, 0 /* new_ybctid */);
 		if (!row_found)
 		{
 			/*
