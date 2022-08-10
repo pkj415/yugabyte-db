@@ -93,6 +93,14 @@ CHECKED_STATUS Executor::ColumnArgsToPB(const PTDmlStmt *tnode, QLWriteRequestPB
 
   common::Jsonb jsonb_null;
   RETURN_NOT_OK(jsonb_null.FromString("null"));
+  char *buffer = (char*) malloc (10);
+
+  LOG(INFO) << "Piyush - here1";
+  if (buffer != NULL)
+    LOG(INFO) << "Piyush - buffer was allocated";
+  else
+    LOG(INFO) << "Piyush - buffer was not allocated";
+
   const MCVector<JsonColumnArg>& jsoncol_args = tnode->json_col_args();
   for (const JsonColumnArg& col : jsoncol_args) {
     QLExpressionPB expr_pb;

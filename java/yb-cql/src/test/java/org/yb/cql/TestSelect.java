@@ -2338,4 +2338,57 @@ public class TestSelect extends BaseCQLTest {
       "and token(h1) <= 4666855113862676480 and h1 in (1, 2);",
       "Row[1, 2]", "Row[2, 3]");
   }
+
+  @Test
+  public void testJsonbNullMemoryLeak() throws Exception {
+    session.execute("create keyspace global_keys");
+    String createTable = "CREATE TABLE global_keys.global_akpk_many_to_one (" +
+      "key_id text," +
+      "key_type text," +
+      "key_value text," +
+      "modified_dtm timestamp," +
+      "version bigint," +
+      "PRIMARY KEY (key_id, key_type)" +
+      ") WITH CLUSTERING ORDER BY (key_type ASC)" +
+      "AND default_time_to_live = 0" +
+      "AND transactions = {'enabled': 'true'};";
+    session.execute(createTable);
+
+    String createIndex = "CREATE INDEX global_akpk_index_many_to_one ON global_keys.global_akpk_many_to_one (key_value, key_type, key_id)" +
+      "WITH CLUSTERING ORDER BY (key_type ASC, key_id ASC)" +
+      "AND transactions = {'enabled': 'true'};";
+    session.execute(createIndex);
+
+    String query =
+      "BEGIN TRANSACTION " +
+      "INSERT INTO global_keys.global_akpk_many_to_one (key_id, key_type, key_value, modified_dtm, version) VALUES ('1', 'type1', 'value1', '2017-07-04 12:30:30 UTC', null) IF version=null OR version<=5 ELSE ERROR; " +
+      "INSERT INTO global_keys.global_akpk_many_to_one (key_id, key_type, key_value, modified_dtm, version) VALUES ('1', 'type1', 'value1', '2017-07-04 12:30:30 UTC', null) IF version=null OR version<=5 ELSE ERROR; " +
+      "INSERT INTO global_keys.global_akpk_many_to_one (key_id, key_type, key_value, modified_dtm, version) VALUES ('1', 'type1', 'value1', '2017-07-04 12:30:30 UTC', null) IF version=null OR version<=5 ELSE ERROR; " +
+      "END TRANSACTION;";
+
+    session.execute(query);
+    query =
+      "BEGIN TRANSACTION " +
+      "INSERT INTO global_keys.global_akpk_many_to_one (key_id, key_type, key_value, modified_dtm, version) VALUES ('2', 'type1', 'value1', '2017-07-04 12:30:30 UTC', null) IF version=null OR version<=5 ELSE ERROR; " +
+      "INSERT INTO global_keys.global_akpk_many_to_one (key_id, key_type, key_value, modified_dtm, version) VALUES ('3', 'type1', 'value1', '2017-07-04 12:30:30 UTC', null) IF version=null OR version<=5 ELSE ERROR; " +
+      "INSERT INTO global_keys.global_akpk_many_to_one (key_id, key_type, key_value, modified_dtm, version) VALUES ('4', 'type1', 'value1', '2017-07-04 12:30:30 UTC', null) IF version=null OR version<=5 ELSE ERROR; " +
+      "END TRANSACTION;";
+
+    session.execute(query);
+    query =
+      "BEGIN TRANSACTION " +
+      "INSERT INTO global_keys.global_akpk_many_to_one (key_id, key_type, key_value, modified_dtm, version) VALUES ('1', 'type1', 'value1', '2017-07-04 12:30:30 UTC', null) IF version=null OR version<=5 ELSE ERROR; " +
+      "INSERT INTO global_keys.global_akpk_many_to_one (key_id, key_type, key_value, modified_dtm, version) VALUES ('2', 'type1', 'value1', '2017-07-04 12:30:30 UTC', null) IF version=null OR version<=5 ELSE ERROR; " +
+      "INSERT INTO global_keys.global_akpk_many_to_one (key_id, key_type, key_value, modified_dtm, version) VALUES ('3', 'type1', 'value1', '2017-07-04 12:30:30 UTC', null) IF version=null OR version<=5 ELSE ERROR; " +
+      "END TRANSACTION;";
+
+    session.execute(query);
+    query =
+      "BEGIN TRANSACTION " +
+      "INSERT INTO global_keys.global_akpk_many_to_one (key_id, key_type, key_value, modified_dtm, version) VALUES ('1', 'type1', 'value1', '2017-07-04 12:30:30 UTC', 5) IF version=null OR version<=5 ELSE ERROR; " +
+      "INSERT INTO global_keys.global_akpk_many_to_one (key_id, key_type, key_value, modified_dtm, version) VALUES ('2', 'type1', 'value1', '2017-07-04 12:30:30 UTC', 6) IF version=null OR version<=5 ELSE ERROR; " +
+      "INSERT INTO global_keys.global_akpk_many_to_one (key_id, key_type, key_value, modified_dtm, version) VALUES ('3', 'type1', 'value1', '2017-07-04 12:30:30 UTC', 7) IF version=null OR version<=5 ELSE ERROR; " +
+      "END TRANSACTION;";
+    session.execute(query);
+  }
 }
