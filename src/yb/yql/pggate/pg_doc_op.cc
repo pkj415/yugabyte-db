@@ -55,8 +55,8 @@ struct PgDocReadOpCachedHelper {
 
 class PgDocReadOpCached : private PgDocReadOpCachedHelper, public PgDocOp {
  public:
-  PgDocReadOpCached(const PgSession::ScopedRefPtr& pg_session, PrefetchedDataHolder data)
-      : PgDocOp(pg_session, &dummy_table), data_(move(data)) {
+  PgDocReadOpCached(const PgSession::ScopedRefPtr& pg_session, PrefetchedDataHolder data, const YBCPgCallbacks& pg_callbacks)
+      : PgDocOp(pg_session, &dummy_table, pg_callbacks), data_(move(data)) {
   }
 
   Status GetResult(std::list<PgDocResult> *rowsets) override {
@@ -221,8 +221,8 @@ Result<PgDocResponse::Data> PgDocResponse::Get() {
 
 //--------------------------------------------------------------------------------------------------
 
-PgDocOp::PgDocOp(const PgSession::ScopedRefPtr& pg_session, PgTable* table, const Sender& sender)
-    : pg_session_(pg_session), table_(*table), sender_(sender) {}
+PgDocOp::PgDocOp(const PgSession::ScopedRefPtr& pg_session, PgTable* table, const YBCPgCallbacks& pg_callbacks, const Sender& sender)
+    : pg_session_(pg_session), table_(*table), pg_callbacks_(pg_callbacks), sender_(sender) {}
 
 PgDocOp::~PgDocOp() {
   // Wait for result in case request was sent.
@@ -484,14 +484,16 @@ Result<PgDocResponse> PgDocOp::DefaultSender(
 
 PgDocReadOp::PgDocReadOp(const PgSession::ScopedRefPtr& pg_session,
                          PgTable* table,
-                         PgsqlReadOpPtr read_op)
-    : PgDocOp(pg_session, table), read_op_(std::move(read_op)) {}
+                         PgsqlReadOpPtr read_op,
+                         const YBCPgCallbacks& pg_callbacks)
+    : PgDocOp(pg_session, table, pg_callbacks), read_op_(std::move(read_op)) {}
 
 PgDocReadOp::PgDocReadOp(const PgSession::ScopedRefPtr& pg_session,
                          PgTable* table,
                          PgsqlReadOpPtr read_op,
-                         const Sender& sender)
-    : PgDocOp(pg_session, table, sender), read_op_(std::move(read_op)) {}
+                         const Sender& sender,
+                         const YBCPgCallbacks& pg_callbacks)
+    : PgDocOp(pg_session, table, pg_callbacks, sender), read_op_(std::move(read_op)) {}
 
 Status PgDocReadOp::ExecuteInit(const PgExecParameters *exec_params) {
   SCHECK(pgsql_ops_.empty(),
@@ -1040,6 +1042,9 @@ void PgDocReadOp::SetReadTimeForBackfill() {
     // TODO: Change to RSTATUS_DCHECK
     DCHECK(exec_params_.backfill_read_time);
     read_op_->set_read_time(ReadHybridTime::FromUint64(exec_params_.backfill_read_time));
+  } else {
+    ConsistentReadPoint *crp = pg_callbacks_.YbGetActiveSnapshotReadPoint();
+    read_op_->set_read_time(crp->GetReadTime());
   }
 }
 
@@ -1093,8 +1098,9 @@ LWPgsqlReadRequestPB& PgDocReadOp::GetReadReq(size_t op_index) {
 
 PgDocWriteOp::PgDocWriteOp(const PgSession::ScopedRefPtr& pg_session,
                            PgTable* table,
-                           PgsqlWriteOpPtr write_op)
-    : PgDocOp(pg_session, table), write_op_(std::move(write_op)) {
+                           PgsqlWriteOpPtr write_op,
+                           const YBCPgCallbacks& pg_callbacks)
+    : PgDocOp(pg_session, table, pg_callbacks), write_op_(std::move(write_op)) {
 }
 
 Status PgDocWriteOp::CompleteProcessResponse() {
@@ -1122,8 +1128,9 @@ LWPgsqlWriteRequestPB& PgDocWriteOp::GetWriteOp(int op_index) {
 }
 
 PgDocOp::SharedPtr MakeDocReadOpWithData(
-    const PgSession::ScopedRefPtr& pg_session, PrefetchedDataHolder data) {
-  return std::make_shared<PgDocReadOpCached>(pg_session, std::move(data));
+    const PgSession::ScopedRefPtr& pg_session, PrefetchedDataHolder data,
+    const YBCPgCallbacks& pg_callbacks) {
+  return std::make_shared<PgDocReadOpCached>(pg_session, std::move(data), pg_callbacks);
 }
 
 }  // namespace pggate

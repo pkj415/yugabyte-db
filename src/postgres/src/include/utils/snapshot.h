@@ -19,6 +19,8 @@
 #include "lib/pairingheap.h"
 #include "storage/buf.h"
 
+#include "yb/yql/pggate/ybc_pg_typedefs.h"
+
 
 typedef struct SnapshotData *Snapshot;
 
@@ -112,7 +114,7 @@ typedef struct SnapshotData
 
 	TimestampTz whenTaken;		/* timestamp when snapshot was taken */
 	XLogRecPtr	lsn;			/* position in the WAL stream when taken */
-	void* yb_consistent_read_point; /* YSQL specific field */
+	YBCConsistentReadPoint yb_consistent_read_point; /* YSQL specific field */
 } SnapshotData;
 
 /*

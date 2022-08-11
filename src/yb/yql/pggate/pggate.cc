@@ -237,7 +237,8 @@ class PrecastRequestSender {
 Status FetchExistingYbctids(PgSession::ScopedRefPtr session,
                             PgOid database_id,
                             std::vector<TableYbctid>* ybctids,
-                            const std::unordered_set<PgOid>& region_local_tables) {
+                            const std::unordered_set<PgOid>& region_local_tables,
+                            const YBCPgCallbacks& pg_callbacks) {
   // Group the items by the table ID.
   std::sort(ybctids->begin(), ybctids->end(), [](const auto& a, const auto& b) {
     return a.table_id < b.table_id;
@@ -263,7 +264,7 @@ Status FetchExistingYbctids(PgSession::ScopedRefPtr session,
     auto* expr_pb = read_op->read_request().add_targets();
     expr_pb->set_column_id(to_underlying(PgSystemAttrNum::kYBTupleId));
     doc_ops.push_back(std::make_unique<PgDocReadOp>(
-        session, &read_op->table(), std::move(read_op), request_sender));
+        session, &read_op->table(), std::move(read_op), pg_callbacks, request_sender));
     auto& doc_op = *doc_ops.back();
     // Postgres uses SELECT FOR KEY SHARE query for FK check. Use same lock level.
     auto exec_params = doc_op.ExecParameters();
@@ -537,6 +538,12 @@ Status PgApiImpl::AddToCurrentPgMemctx(size_t table_desc_id,
                                        const PgTableDescPtr &table_desc) {
   pg_callbacks_.GetCurrentYbMemctx()->Cache(table_desc_id, table_desc);
   return Status::OK();
+}
+
+void PgApiImpl::AddToCurrentPgMemctx(std::unique_ptr<ConsistentReadPoint> crp,
+                                       ConsistentReadPoint **handle) {
+  *handle = crp.get();
+  pg_callbacks_.GetCurrentYbMemctx()->Register(crp.release());
 }
 
 Status PgApiImpl::GetTabledescFromCurrentPgMemctx(size_t table_desc_id, PgTableDesc **handle) {
@@ -1249,10 +1256,8 @@ void PgApiImpl::ResetOperationsBuffering() {
   pg_session_->ResetOperationsBuffering();
 }
 
-ConsistentReadPoint* PgApiImpl::GetLatestSnapshot() {
-  std::shared_ptr<ConsistentReadPoint> consistent_read_point = pg_txn_manager_->GetLatestSnapshot();
-  snapshots.push_back(consistent_read_point);
-  return consistent_read_point.get();
+void PgApiImpl::GetLatestSnapshot(ConsistentReadPoint **crp) {
+  AddToCurrentPgMemctx(pg_txn_manager_->GetLatestSnapshot(), crp);
 }
 
 Status PgApiImpl::FlushBufferedOperations() {
@@ -1286,7 +1291,7 @@ Status PgApiImpl::NewInsert(const PgObjectId& table_id,
                             bool is_region_local,
                             PgStatement **handle) {
   *handle = nullptr;
-  auto stmt = std::make_unique<PgInsert>(pg_session_, table_id, is_single_row_txn, is_region_local);
+  auto stmt = std::make_unique<PgInsert>(pg_session_, table_id, is_single_row_txn, is_region_local, pg_callbacks_);
   RETURN_NOT_OK(stmt->Prepare());
   RETURN_NOT_OK(AddToCurrentPgMemctx(std::move(stmt), handle));
   return Status::OK();
@@ -1335,7 +1340,7 @@ Status PgApiImpl::NewUpdate(const PgObjectId& table_id,
                             bool is_region_local,
                             PgStatement **handle) {
   *handle = nullptr;
-  auto stmt = std::make_unique<PgUpdate>(pg_session_, table_id, is_single_row_txn, is_region_local);
+  auto stmt = std::make_unique<PgUpdate>(pg_session_, table_id, is_single_row_txn, is_region_local, pg_callbacks_);
   RETURN_NOT_OK(stmt->Prepare());
   RETURN_NOT_OK(AddToCurrentPgMemctx(std::move(stmt), handle));
   return Status::OK();
@@ -1356,7 +1361,7 @@ Status PgApiImpl::NewDelete(const PgObjectId& table_id,
                             bool is_region_local,
                             PgStatement **handle) {
   *handle = nullptr;
-  auto stmt = std::make_unique<PgDelete>(pg_session_, table_id, is_single_row_txn, is_region_local);
+  auto stmt = std::make_unique<PgDelete>(pg_session_, table_id, is_single_row_txn, is_region_local, pg_callbacks_);
   RETURN_NOT_OK(stmt->Prepare());
   RETURN_NOT_OK(AddToCurrentPgMemctx(std::move(stmt), handle));
   return Status::OK();
@@ -1375,7 +1380,7 @@ Status PgApiImpl::NewSample(const PgObjectId& table_id,
                             bool is_region_local,
                             PgStatement **handle) {
   *handle = nullptr;
-  auto sample = std::make_unique<PgSample>(pg_session_, targrows, table_id, is_region_local);
+  auto sample = std::make_unique<PgSample>(pg_session_, targrows, table_id, is_region_local, pg_callbacks_);
   RETURN_NOT_OK(sample->Prepare());
   RETURN_NOT_OK(AddToCurrentPgMemctx(std::move(sample), handle));
   return Status::OK();
@@ -1434,7 +1439,7 @@ Status PgApiImpl::NewTruncateColocated(const PgObjectId& table_id,
                                        PgStatement **handle) {
   *handle = nullptr;
   auto stmt = std::make_unique<PgTruncateColocated>(
-      pg_session_, table_id, is_single_row_txn, is_region_local);
+      pg_session_, table_id, is_single_row_txn, is_region_local, pg_callbacks);
   RETURN_NOT_OK(stmt->Prepare());
   RETURN_NOT_OK(AddToCurrentPgMemctx(std::move(stmt), handle));
   return Status::OK();
@@ -1468,11 +1473,11 @@ Status PgApiImpl::NewSelect(const PgObjectId& table_id,
       return STATUS(InvalidArgument, "Cannot run query with invalid index ID");
     }
     stmt = std::make_unique<PgSelectIndex>(
-        pg_session_, table_id, index_id, prepare_params, is_region_local);
+        pg_session_, table_id, index_id, prepare_params, is_region_local, pg_callbacks_);
   } else {
     // For IndexScan PgSelect processing will create subquery PgSelectIndex.
     stmt = std::make_unique<PgSelect>(
-        pg_session_, table_id, index_id, prepare_params, is_region_local);
+        pg_session_, table_id, index_id, prepare_params, is_region_local, pg_callbacks_);
   }
 
   RETURN_NOT_OK(stmt->Prepare());
@@ -1505,7 +1510,7 @@ Status PgApiImpl::ExecSelect(PgStatement *handle, const PgExecParameters *exec_p
       DLOG(FATAL) << "Data was not prefetched for request "
                   << dml_read.read_req()->ShortDebugString();
     } else {
-      dml_read.UpgradeDocOp(MakeDocReadOpWithData(pg_session_, std::move(data)));
+      dml_read.UpgradeDocOp(MakeDocReadOpWithData(pg_session_, std::move(data), pg_callbacks_));
     }
   }
   return dml_read.Exec(exec_params);
@@ -1738,7 +1743,8 @@ Result<bool> PgApiImpl::ForeignKeyReferenceExists(
       LightweightTableYbctid(table_id, ybctid), make_lw_function(
           [this, database_id](std::vector<TableYbctid>* ybctids,
                               const std::unordered_set<PgOid>& region_local_tables) {
-            return FetchExistingYbctids(pg_session_, database_id, ybctids, region_local_tables);
+            return FetchExistingYbctids(
+                pg_session_, database_id, ybctids, region_local_tables, pg_callbacks_);
           }));
 }
 

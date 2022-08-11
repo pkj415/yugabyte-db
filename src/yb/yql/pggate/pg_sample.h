@@ -29,7 +29,8 @@ class PgSample : public PgDmlRead {
   PgSample(PgSession::ScopedRefPtr pg_session,
            const int targrows,
            const PgObjectId& table_id,
-           bool is_region_local);
+           bool is_region_local,
+           const YBCPgCallbacks& pg_callbacks);
   virtual ~PgSample();
 
   StmtOp stmt_op() const override { return StmtOp::STMT_SAMPLE; }
@@ -60,7 +61,8 @@ class PgSamplePicker : public PgSelectIndex {
  public:
   PgSamplePicker(PgSession::ScopedRefPtr pg_session,
                  const PgObjectId& table_id,
-                 bool is_region_local);
+                 bool is_region_local,
+                 const YBCPgCallbacks& pg_callbacks);
   virtual ~PgSamplePicker();
 
   // Prepare picker

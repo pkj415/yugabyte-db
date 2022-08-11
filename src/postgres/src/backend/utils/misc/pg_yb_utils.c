@@ -532,6 +532,7 @@ YBInitPostgresBackend(
 		callbacks.GetDebugQueryString = &GetDebugQueryString;
 		callbacks.WriteExecOutParam = &YbWriteExecOutParam;
 		callbacks.YbPgMemUpdateMax = &YbPgMemUpdateMax;
+		callbacks.YbGetActiveSnapshotReadPoint = &YbGetActiveSnapshotReadPoint;
 		YBCInitPgGate(type_table, count, callbacks);
 		YBCInstallTxnDdlHook();
 

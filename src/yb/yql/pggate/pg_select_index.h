@@ -30,7 +30,8 @@ class PgSelectIndex : public PgSelect {
                 const PgObjectId& table_id,
                 const PgObjectId& index_id,
                 const PgPrepareParameters *prepare_params,
-                bool is_region_local);
+                bool is_region_local,
+                const YBCPgCallbacks& pg_callbacks);
 
   // Prepare NESTED query for secondary index. This function is called when Postgres layer is
   // accessing the IndexTable via an outer select (Sequential or primary scans)

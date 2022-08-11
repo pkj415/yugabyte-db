@@ -29,8 +29,9 @@ using std::make_shared;
 PgSample::PgSample(PgSession::ScopedRefPtr pg_session,
                    int targrows,
                    const PgObjectId& table_id,
-                   bool is_region_local)
-    : PgDmlRead(pg_session, table_id, PgObjectId(), nullptr, is_region_local),
+                   bool is_region_local,
+                   const YBCPgCallbacks& pg_callbacks)
+    : PgDmlRead(pg_session, table_id, PgObjectId(), nullptr, is_region_local, pg_callbacks),
       targrows_(targrows) {}
 
 PgSample::~PgSample() {
@@ -43,13 +44,14 @@ Status PgSample::Prepare() {
 
   // Setup sample picker as secondary index query
   secondary_index_query_ = std::make_unique<PgSamplePicker>(
-      pg_session_, table_id_, is_region_local_);
+      pg_session_, table_id_, is_region_local_, pg_callbacks_);
   RETURN_NOT_OK(secondary_index_query_->Prepare());
 
   // Prepare read op to fetch rows
   auto read_op = ArenaMakeShared<PgsqlReadOp>(arena_ptr(), &arena(), *target_, is_region_local_);
   read_req_ = std::shared_ptr<LWPgsqlReadRequestPB>(read_op, &read_op->read_request());
-  doc_op_ = make_shared<PgDocReadOp>(pg_session_, &target_, std::move(read_op));
+  doc_op_ = make_shared<PgDocReadOp>(
+      pg_session_, &target_, std::move(read_op), pg_callbacks_);
 
   return Status::OK();
 }
@@ -85,8 +87,9 @@ Status PgSample::GetEstimatedRowCount(double *liverows, double *deadrows) {
 
 PgSamplePicker::PgSamplePicker(PgSession::ScopedRefPtr pg_session,
                                const PgObjectId& table_id,
-                               bool is_region_local)
-    : PgSelectIndex(pg_session, table_id, PgObjectId(), nullptr, is_region_local) {}
+                               bool is_region_local,
+                               const YBCPgCallbacks& callbacks)
+    : PgSelectIndex(pg_session, table_id, PgObjectId(), nullptr, is_region_local, callbacks) {}
 
 PgSamplePicker::~PgSamplePicker() {
 }
@@ -96,7 +99,8 @@ Status PgSamplePicker::Prepare() {
   bind_ = PgTable(nullptr);
   auto read_op = ArenaMakeShared<PgsqlReadOp>(arena_ptr(), &arena(), *target_, is_region_local_);
   read_req_ = std::shared_ptr<LWPgsqlReadRequestPB>(read_op, &read_op->read_request());
-  doc_op_ = make_shared<PgDocReadOp>(pg_session_, &target_, std::move(read_op));
+  doc_op_ = make_shared<PgDocReadOp>(
+      pg_session_, &target_, std::move(read_op), pg_callbacks_);
   return Status::OK();
 }
 

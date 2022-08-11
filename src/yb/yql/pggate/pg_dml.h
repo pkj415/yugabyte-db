@@ -96,12 +96,15 @@ class PgDml : public PgStatement {
  protected:
   // Method members.
   // Constructor.
-  PgDml(PgSession::ScopedRefPtr pg_session, const PgObjectId& table_id, bool is_region_local);
+  PgDml(
+      PgSession::ScopedRefPtr pg_session, const PgObjectId& table_id, bool is_region_local,
+      const YBCPgCallbacks& pg_callbacks_);
   PgDml(PgSession::ScopedRefPtr pg_session,
         const PgObjectId& table_id,
         const PgObjectId& index_id,
         const PgPrepareParameters *prepare_params,
-        bool is_region_local);
+        bool is_region_local,
+        const YBCPgCallbacks& pg_callbacks_);
 
   // Allocate protobuf for a SELECTed expression.
   virtual LWPgsqlExpressionPB *AllocTargetPB() = 0;
@@ -237,6 +240,8 @@ class PgDml : public PgStatement {
   // Yugabyte has a few IN/OUT parameters of statement execution, "pg_exec_params_" is used to sent
   // OUT value back to postgres.
   const PgExecParameters *pg_exec_params_ = NULL;
+
+  const YBCPgCallbacks& pg_callbacks_; 
 
   //------------------------------------------------------------------------------------------------
   // Hashed and range values/components used to compute the tuple id.

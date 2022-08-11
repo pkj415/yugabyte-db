@@ -1826,7 +1826,7 @@ GetSnapshotData(Snapshot snapshot)
 		MaintainOldSnapshotTimeMapping(snapshot->whenTaken, xmin);
 	}
 
-	snapshot->yb_consistent_read_point = YBCGetLatestSnapshot();
+	YBCGetLatestSnapshot(&snapshot->yb_consistent_read_point);
 	return snapshot;
 }
 

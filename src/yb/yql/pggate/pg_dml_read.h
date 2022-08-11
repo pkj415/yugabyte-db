@@ -58,7 +58,7 @@ class PgDmlRead : public PgDml {
  public:
   PgDmlRead(PgSession::ScopedRefPtr pg_session, const PgObjectId& table_id,
            const PgObjectId& index_id, const PgPrepareParameters *prepare_params,
-           bool is_region_local);
+           bool is_region_local, const YBCPgCallbacks& pg_callbacks);
   virtual ~PgDmlRead();
 
   StmtOp stmt_op() const override { return StmtOp::STMT_SELECT; }

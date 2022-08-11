@@ -418,6 +418,12 @@ GetLatestSnapshot(void)
 	return SecondarySnapshot;
 }
 
+YBCConsistentReadPoint
+YbGetActiveSnapshotReadPoint()
+{
+	return ActiveSnapshot->yb_consistent_read_point;
+}
+
 /*
  * GetOldestSnapshot
  *

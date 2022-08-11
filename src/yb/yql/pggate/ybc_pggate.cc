@@ -780,8 +780,8 @@ void YBCPgResetOperationsBuffering() {
   pgapi->ResetOperationsBuffering();
 }
 
-void* YBCGetLatestSnapshot() {
-  return pgapi->GetLatestSnapshot();
+void YBCGetLatestSnapshot(YBCConsistentReadPoint *handle) {
+  pgapi->GetLatestSnapshot(handle);
 }
 
 YBCStatus YBCPgFlushBufferedOperations() {

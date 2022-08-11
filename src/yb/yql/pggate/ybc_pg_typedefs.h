@@ -21,6 +21,11 @@
 
 #ifdef __cplusplus
 
+namespace yb {
+class ConsistentReadPoint;
+}
+typedef class yb::ConsistentReadPoint *YBCConsistentReadPoint;
+
 #define YB_DEFINE_HANDLE_TYPE(name) \
     namespace yb { \
     namespace pggate { \
@@ -30,6 +35,7 @@
     typedef class yb::pggate::name *YBC##name;
 
 #else
+typedef struct ConsistentReadPoint *YBCConsistentReadPoint;
 #define YB_DEFINE_HANDLE_TYPE(name) typedef struct name *YBC##name;
 #endif  // __cplusplus
 
@@ -313,7 +319,7 @@ typedef struct PgExecParameters {
   char *partition_key;
   PgExecOutParam *out_param;
   bool is_index_backfill;
-  void* consistent_read_point
+  void* consistent_read_point;
 #endif
 } YBCPgExecParameters;
 
@@ -336,6 +342,7 @@ typedef struct PgCallbacks {
   const char* (*GetDebugQueryString)();
   void (*WriteExecOutParam)(PgExecOutParam *, const YbcPgExecOutParamValue *);
   void (*YbPgMemUpdateMax)();
+  YBCConsistentReadPoint (*YbGetActiveSnapshotReadPoint)();
 } YBCPgCallbacks;
 
 typedef struct PgGFlagsAccessor {

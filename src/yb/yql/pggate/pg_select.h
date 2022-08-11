@@ -28,7 +28,7 @@ class PgSelect : public PgDmlRead {
  public:
   PgSelect(PgSession::ScopedRefPtr pg_session, const PgObjectId& table_id,
            const PgObjectId& index_id, const PgPrepareParameters *prepare_params,
-           bool is_region_local);
+           bool is_region_local, const YBCPgCallbacks& pg_callbacks);
   virtual ~PgSelect();
 
   // Prepare query before execution.

@@ -392,7 +392,7 @@ YBCStatus YBCPgBuildYBTupleId(const YBCPgYBTupleIdDescriptor* data, uint64_t *yb
 YBCStatus YBCPgStartOperationsBuffering();
 YBCStatus YBCPgStopOperationsBuffering();
 void YBCPgResetOperationsBuffering();
-void* YBCGetLatestSnapshot();
+void YBCGetLatestSnapshot(YBCConsistentReadPoint *handle);
 YBCStatus YBCPgFlushBufferedOperations();
 
 YBCStatus YBCPgNewSample(const YBCPgOid database_oid,

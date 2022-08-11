@@ -16,6 +16,7 @@
 
 #include <functional>
 #include <memory>
+#include <stack>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -141,6 +142,8 @@ class PgApiImpl {
   // Cache table descriptor in YB Memctx. When Memctx is destroyed, the descriptor is destructed.
   Status AddToCurrentPgMemctx(size_t table_desc_id,
                                       const PgTableDescPtr &table_desc);
+  void AddToCurrentPgMemctx(std::unique_ptr<ConsistentReadPoint> crp,
+                                      ConsistentReadPoint **handle);
   // Read table descriptor that was cached in YB Memctx.
   Status GetTabledescFromCurrentPgMemctx(size_t table_desc_id, PgTableDesc **handle);
 
@@ -444,7 +447,7 @@ class PgApiImpl {
   Status StartOperationsBuffering();
   Status StopOperationsBuffering();
   void ResetOperationsBuffering();
-  ConsistentReadPoint* GetLatestSnapshot();
+  void GetLatestSnapshot(ConsistentReadPoint **crp);
   Status FlushBufferedOperations();
 
   //------------------------------------------------------------------------------------------------
@@ -639,7 +642,6 @@ class PgApiImpl {
   scoped_refptr<PgSession> pg_session_;
   std::unique_ptr<PgSysTablePrefetcher> pg_sys_table_prefetcher_;
   std::unordered_set<std::unique_ptr<PgMemctx>, PgMemctxHasher, PgMemctxComparator> mem_contexts_;
-  std::vector<std::shared_ptr<ConsistentReadPoint>> snapshots;
 };
 
 }  // namespace pggate

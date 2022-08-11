@@ -30,8 +30,9 @@ PgSelectIndex::PgSelectIndex(PgSession::ScopedRefPtr pg_session,
                              const PgObjectId& table_id,
                              const PgObjectId& index_id,
                              const PgPrepareParameters *prepare_params,
-                             bool is_region_local)
-    : PgSelect(pg_session, table_id, index_id, prepare_params, is_region_local) {
+                             bool is_region_local,
+                             const YBCPgCallbacks& pg_callbacks)
+    : PgSelect(pg_session, table_id, index_id, prepare_params, is_region_local, pg_callbacks) {
 }
 
 Result<PgTableDescPtr> PgSelectIndex::LoadTable() {

@@ -63,6 +63,7 @@ extern PGDLLIMPORT TransactionId RecentGlobalDataXmin;
 
 extern Snapshot GetTransactionSnapshot(void);
 extern Snapshot GetLatestSnapshot(void);
+extern YBCConsistentReadPoint YbGetActiveSnapshotReadPoint();
 extern void SnapshotSetCommandId(CommandId curcid);
 extern Snapshot GetOldestSnapshot(void);
 

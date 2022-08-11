@@ -26,13 +26,14 @@
 #include "yb/gutil/thread_annotations.h"
 
 #include "yb/util/locks.h"
+#include "yb/yql/pggate/pg_memctx.h"
 
 namespace yb {
 
 YB_STRONGLY_TYPED_BOOL(HadReadTime);
 
 // ConsistentReadPoint tracks a consistent read point to read across tablets.
-class ConsistentReadPoint {
+class ConsistentReadPoint : public yb::pggate::PgMemctx::Registrable {
  public:
   // A map of tablet id to local limits.
   typedef std::unordered_map<TabletId, HybridTime> HybridTimeMap;

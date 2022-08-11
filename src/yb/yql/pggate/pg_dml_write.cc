@@ -27,8 +27,9 @@ namespace pggate {
 PgDmlWrite::PgDmlWrite(PgSession::ScopedRefPtr pg_session,
                        const PgObjectId& table_id,
                        bool is_single_row_txn,
-                       bool is_region_local)
-    : PgDml(std::move(pg_session), table_id, is_region_local),
+                       bool is_region_local,
+                       const YBCPgCallbacks& pg_callbacks)
+    : PgDml(std::move(pg_session), table_id, is_region_local, pg_callbacks),
       is_single_row_txn_(is_single_row_txn) {
 }
 
@@ -148,7 +149,8 @@ void PgDmlWrite::AllocWriteRequest() {
   write_req_->set_schema_version(target_->schema_version());
   write_req_->set_stmt_id(reinterpret_cast<uint64_t>(write_req_.get()));
 
-  doc_op_ = std::make_shared<PgDocWriteOp>(pg_session_, &target_, std::move(write_op));
+  doc_op_ = std::make_shared<PgDocWriteOp>(
+      pg_session_, &target_, std::move(write_op), pg_callbacks_);
 }
 
 LWPgsqlExpressionPB *PgDmlWrite::AllocColumnBindPB(PgColumn *col) {

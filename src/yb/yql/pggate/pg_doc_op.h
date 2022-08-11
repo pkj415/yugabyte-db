@@ -256,6 +256,7 @@ class PgDocOp : public std::enable_shared_from_this<PgDocOp> {
   // Constructors & Destructors.
   PgDocOp(
       const PgSession::ScopedRefPtr& pg_session, PgTable* table,
+      const YBCPgCallbacks& pg_callbacks,
       const Sender& = Sender(&PgDocOp::DefaultSender));
   virtual ~PgDocOp();
 
@@ -455,6 +456,8 @@ class PgDocOp : public std::enable_shared_from_this<PgDocOp> {
   // Output parameter of the execution.
   string out_param_backfill_spec_;
 
+  const YBCPgCallbacks& pg_callbacks_;
+
  private:
   // Result set either from selected or returned targets is cached in a list of strings.
   // Querying state variables.
@@ -474,10 +477,12 @@ class PgDocReadOp : public PgDocOp {
   typedef std::unique_ptr<PgDocReadOp> UniPtr;
   typedef std::unique_ptr<const PgDocReadOp> UniPtrConst;
 
-  PgDocReadOp(const PgSession::ScopedRefPtr& pg_session, PgTable* table, PgsqlReadOpPtr read_op);
+  PgDocReadOp(
+      const PgSession::ScopedRefPtr& pg_session, PgTable* table, PgsqlReadOpPtr read_op,
+      const YBCPgCallbacks& pg_callbacks);
   PgDocReadOp(
       const PgSession::ScopedRefPtr& pg_session, PgTable* table,
-      PgsqlReadOpPtr read_op, const Sender& sender);
+      PgsqlReadOpPtr read_op, const Sender& sender, const YBCPgCallbacks& pg_callbacks);
 
   Status ExecuteInit(const PgExecParameters *exec_params) override;
 
@@ -598,7 +603,8 @@ class PgDocWriteOp : public PgDocOp {
   // Constructors & Destructors.
   PgDocWriteOp(const PgSession::ScopedRefPtr& pg_session,
                PgTable* table,
-               PgsqlWriteOpPtr write_op);
+               PgsqlWriteOpPtr write_op,
+               const YBCPgCallbacks& pg_callbacks);
 
   // Set write time.
   void SetWriteTime(const HybridTime& write_time);
@@ -635,7 +641,8 @@ class PgDocWriteOp : public PgDocOp {
 };
 
 PgDocOp::SharedPtr MakeDocReadOpWithData(
-    const PgSession::ScopedRefPtr& pg_session, PrefetchedDataHolder data);
+    const PgSession::ScopedRefPtr& pg_session, PrefetchedDataHolder data,
+    const YBCPgCallbacks& pg_callbacks);
 
 }  // namespace pggate
 }  // namespace yb

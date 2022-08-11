@@ -466,9 +466,9 @@ TxnPriorityRequirement PgTxnManager::GetTransactionPriorityType() const {
   return kHighestPriority;
 }
 
-std::shared_ptr<ConsistentReadPoint> PgTxnManager::GetLatestSnapshot() {
-  std::shared_ptr<ConsistentReadPoint> consistent_read_point =
-    std::make_shared<ConsistentReadPoint>(clock_);
+std::unique_ptr<ConsistentReadPoint> PgTxnManager::GetLatestSnapshot() {
+  std::unique_ptr<ConsistentReadPoint> consistent_read_point =
+    std::make_unique<ConsistentReadPoint>(clock_);
   consistent_read_point->SetCurrentReadTime();
   return consistent_read_point;
 }

@@ -18,6 +18,7 @@
 
 #include <mutex>
 
+#include "yb/common/consistent_read_point.h"
 #include "yb/common/clock.h"
 #include "yb/common/transaction.h"
 #include "yb/gutil/ref_counted.h"
@@ -81,7 +82,7 @@ class PgTxnManager : public RefCountedThreadSafe<PgTxnManager> {
 
   double GetTransactionPriority() const;
   TxnPriorityRequirement GetTransactionPriorityType() const;
-  std::shared_ptr<ConsistentReadPoint> GetLatestSnapshot();
+  std::unique_ptr<ConsistentReadPoint> GetLatestSnapshot();
   uint64 GetClockNow();
 
  private:
@@ -118,7 +119,7 @@ class PgTxnManager : public RefCountedThreadSafe<PgTxnManager> {
   bool enable_follower_reads_ = false;
   uint64_t follower_read_staleness_ms_ = 0;
   HybridTime read_time_for_follower_reads_;
-  ConsistentReadPoint read_point_;
+  // ConsistentReadPoint read_point_;
   bool deferrable_ = false;
 
   bool ddl_mode_ = false;

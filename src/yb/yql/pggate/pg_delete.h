@@ -32,8 +32,9 @@ class PgDelete : public PgDmlWrite {
   PgDelete(PgSession::ScopedRefPtr pg_session,
            const PgObjectId& table_id,
            bool is_single_row_txn,
-           bool is_region_local)
-      : PgDmlWrite(std::move(pg_session), table_id, is_single_row_txn, is_region_local) {}
+           bool is_region_local,
+           const YBCPgCallbacks& pg_callbacks)
+      : PgDmlWrite(std::move(pg_session), table_id, is_single_row_txn, is_region_local, pg_callbacks) {}
 
   StmtOp stmt_op() const override { return StmtOp::STMT_DELETE; }
 

@@ -36,16 +36,19 @@ namespace pggate {
 
 PgDml::PgDml(PgSession::ScopedRefPtr pg_session,
              const PgObjectId& table_id,
-             bool is_region_local)
-    : PgStatement(std::move(pg_session)), table_id_(table_id), is_region_local_(is_region_local) {
+             bool is_region_local,
+             const YBCPgCallbacks& pg_callbacks)
+    : PgStatement(std::move(pg_session)), table_id_(table_id), is_region_local_(is_region_local), 
+      pg_callbacks_(pg_callbacks) {
 }
 
 PgDml::PgDml(PgSession::ScopedRefPtr pg_session,
              const PgObjectId& table_id,
              const PgObjectId& index_id,
              const PgPrepareParameters *prepare_params,
-             bool is_region_local)
-    : PgDml(pg_session, table_id, is_region_local) {
+             bool is_region_local,
+             const YBCPgCallbacks& pg_callbacks)
+    : PgDml(pg_session, table_id, is_region_local, pg_callbacks) {
 
   if (prepare_params) {
     prepare_params_ = *prepare_params;
