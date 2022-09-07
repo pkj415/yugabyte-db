@@ -201,6 +201,8 @@ typedef struct TransactionStateData
 	List		*YBPostponedDdlOps; /* We postpone execution of non-revertable
 				                     * DocDB operations (e.g. drop table/index)
 				                     * until the rest of the txn succeeds */
+	bool		ybIsInternalRcSubTransaction; /* Whether this sub transaction was started internally for
+																				* READ COMMITTED isolation */
 } TransactionStateData;
 
 typedef TransactionStateData *TransactionState;
@@ -236,6 +238,7 @@ static TransactionStateData TopTransactionStateData = {
 	false,						/* ybDataSentForCurrQuery */
 	false,						/* isYBTxnWithPostgresRel */
 	NULL,						/* YBPostponedDdlOps */
+	false,					/* ybIsInternalRcSubTransaction */
 };
 
 /*
@@ -4571,6 +4574,7 @@ BeginInternalSubTransactionForReadCommittedStatement() {
 
 	StartSubTransaction();
 	s->blockState = TBLOCK_SUBINPROGRESS;
+	s->ybIsInternalRcSubTransaction = true;
 }
 
 /*
@@ -6222,4 +6226,29 @@ void YbClearCurrentTransactionId()
 {
 	CurrentTransactionState->transactionId = InvalidTransactionId;
 	MyPgXact->xid = InvalidTransactionId;
+}
+
+/*
+ * Check if all sub transactions are internal ones started before each statement for READ COMMITTED
+ * isolation level.
+ */
+bool YbHasOnlyInternalRcSubTransactions()
+{
+	for (TransactionState s = CurrentTransactionState; s != NULL; s = s->parent)
+	{
+		if (s->nestingLevel >= 2 && !s->ybIsInternalRcSubTransaction)
+			return false;
+	}
+	return true;
+}
+
+void YbRollbackAndReleaseAllSubTransactions()
+{
+	elog(LOG, "Piyush - YbRollbackAndReleaseAllSubTransactions");
+	TransactionState s = CurrentTransactionState;
+	while (s->parent != NULL)
+	{
+		RollbackAndReleaseCurrentSubTransaction();
+		s = CurrentTransactionState;
+	}
 }

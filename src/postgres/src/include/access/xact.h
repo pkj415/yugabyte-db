@@ -480,4 +480,6 @@ extern void YBClearDdlHandles(void);
  * Utility for clearing transaction ID.
 */
 extern void YbClearCurrentTransactionId(void);
+extern bool YbHasOnlyInternalRcSubTransactions(void);
+extern void YbRollbackAndReleaseAllSubTransactions(void);
 #endif							/* XACT_H */

@@ -194,6 +194,7 @@
 #include "access/xact.h"
 #include "access/xlog.h"
 #include "miscadmin.h"
+#include "pg_yb_utils.h"
 #include "pgstat.h"
 #include "storage/bufmgr.h"
 #include "storage/predicate.h"
@@ -1662,6 +1663,11 @@ GetSerializableTransactionSnapshotInt(Snapshot snapshot,
 									  VirtualTransactionId *sourcevxid,
 									  int sourcepid)
 {
+	if (!YBIsPgLockingEnabled()) {
+		/* Locking is handled separately by YugaByte. */
+		return snapshot;
+	}
+
 	PGPROC	   *proc;
 	VirtualTransactionId vxid;
 	SERIALIZABLEXACT *sxact,
@@ -3221,6 +3227,11 @@ SetNewSxactGlobalXmin(void)
 void
 ReleasePredicateLocks(bool isCommit)
 {
+	if (!YBIsPgLockingEnabled()) {
+		/* Locking is handled separately by YugaByte. */
+		return;
+	}
+
 	bool		needToClear;
 	RWConflict	conflict,
 				nextConflict,

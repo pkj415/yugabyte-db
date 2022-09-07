@@ -43,3 +43,4 @@ test: skip-locked-3
 test: tuplelock-conflict
 test: multixact-no-forget
 test: drop-probe-waiting-on-aborted-blocker-subtxn
+test: set-transaction-isolation-level
