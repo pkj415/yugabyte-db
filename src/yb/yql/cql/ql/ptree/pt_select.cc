@@ -110,6 +110,7 @@ class Selectivity {
     for (size_t i = 0; i < schema.num_key_columns(); i++) {
       id_to_idx.emplace(schema.ColumnId(i), i);
     }
+    VLOG(4) << "index_id_:" << index_id_ << ", id_to_idx=" << yb::ToString(id_to_idx);
     Analyze(memctx, stmt, id_to_idx, schema.num_key_columns(), schema.num_hash_key_columns());
   }
 
@@ -137,6 +138,7 @@ class Selectivity {
         id_to_idx.emplace(index_info.column(i).indexed_column_id, i);
       }
     }
+    VLOG(4) << "index_id_:" << index_id_ << ", id_to_idx=" << yb::ToString(id_to_idx);
     Analyze(memctx, stmt, id_to_idx, index_info.key_column_count(), index_info.hash_column_count());
   }
 
@@ -298,8 +300,6 @@ class Selectivity {
       }
       const auto iter = id_to_idx.find(col_op.desc()->id());
       if (iter != id_to_idx.end()) {
-        LOG_IF(DFATAL, iter->second >= ops.size())
-            << "Bad op index=" << iter->second << " for vector size=" << ops.size();
         ops[iter->second] = GetOperatorSelectivity(col_op.yb_op());
       } else {
         num_non_key_ops_++;
