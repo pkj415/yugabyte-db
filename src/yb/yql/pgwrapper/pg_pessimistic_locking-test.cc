@@ -27,6 +27,8 @@
 #include "yb/util/monotime.h"
 #include "yb/util/test_macros.h"
 #include "yb/util/test_thread_holder.h"
+// #include "yb/util/locks.h"
+#include "yb/util/unique_lock.h"
 
 #include "yb/util/tsan_util.h"
 #include "yb/yql/pgwrapper/libpq_test_base.h"
@@ -40,6 +42,7 @@
 
 DECLARE_bool(enable_wait_queue_based_pessimistic_locking);
 DECLARE_bool(enable_deadlock_detection);
+DECLARE_bool(yb_enable_read_committed_isolation);
 DECLARE_bool(TEST_select_all_status_tablets);
 DECLARE_string(ysql_pg_conf_csv);
 DECLARE_bool(enable_automatic_tablet_splitting);
@@ -52,6 +55,95 @@ using namespace std::literals;
 
 namespace yb {
 namespace pgwrapper {
+
+class PgConcurrentRowLocks : public PgMiniTestBase {
+ protected:
+
+  void SetUp() override {
+    FLAGS_ysql_pg_conf_csv =
+        "retry_max_backoff=1,retry_min_backoff=1,retry_backoff_multiplier=1";
+    FLAGS_yb_enable_read_committed_isolation = true;
+    PgMiniTestBase::SetUp();
+  }
+};
+
+TEST_F(PgConcurrentRowLocks, YB_DISABLE_TEST_IN_TSAN(TestConcurrentRowLocks)) {
+  auto setup_conn = ASSERT_RESULT(Connect());
+  constexpr int kClients = 80;
+  ASSERT_OK(setup_conn.Execute("CREATE TABLE test (k INT PRIMARY KEY, v INT) SPLIT INTO 1 TABLETS"));
+  ASSERT_OK(setup_conn.Execute("insert into test values (1, 1)"));
+
+  TestThreadHolder thread_holder;
+
+  auto latency_measure_conn = ASSERT_RESULT(Connect());
+  int lat_runs_cnt = 10000, lat_successful_runs = 0, lat_failed_runs = 0;
+  MonoDelta latency_sum = MonoDelta::FromMilliseconds(0);
+  for (int i=0; i<lat_runs_cnt; i++) {
+    MonoTime start = MonoTime::Now();
+    ASSERT_OK(latency_measure_conn.StartTransaction(IsolationLevel::READ_COMMITTED));
+    ASSERT_OK(latency_measure_conn.FetchFormat("SELECT * FROM test WHERE k=1 FOR UPDATE"));
+
+    if (latency_measure_conn.CommitTransaction().ok()) {
+        LOG(INFO) << "Commit succeeded " << i;
+        lat_successful_runs++;
+        MonoTime end = MonoTime::Now();
+        latency_sum += end - start;
+    } else {
+        LOG(INFO) << "Commit failed " << i;
+        lat_failed_runs++;
+    }
+  }
+  LOG(INFO) << "Avg latency=" << latency_sum.ToMilliseconds()/lat_runs_cnt << "ms"
+            << " lat_successful_runs=" << lat_successful_runs
+            << " lat_failed_runs=" << lat_failed_runs;
+
+  CountDownLatch start(kClients);
+  CountDownLatch done(kClients);
+
+  MonoDelta test_duration = MonoDelta::FromSeconds(50);
+
+  std::atomic<uint64_t> successful_txns_count_agg = 0;
+  std::atomic<uint64_t> failed_txns_count_agg = 0;
+
+  for (int i = 0; i != kClients; ++i) {
+    thread_holder.AddThreadFunctor(
+        [this, i, &start, &done, &test_duration, &successful_txns_count_agg, &failed_txns_count_agg] {
+      MonoTime test_start = MonoTime::Now();
+      auto conn = ASSERT_RESULT(Connect());
+      ASSERT_OK(conn.Execute("SET yb_debug_log_internal_restarts=true"));
+      start.CountDown();
+      ASSERT_TRUE(start.WaitFor(5s * kTimeMultiplier));
+      int successful_txns_count = 0;
+      int failed_txns_count = 0;
+      while (test_start + test_duration > MonoTime::Now()) {
+        ASSERT_OK(conn.StartTransaction(IsolationLevel::READ_COMMITTED));
+        MonoTime start = MonoTime::Now();
+        LOG(INFO) << "Piyush - start time picked";
+        ASSERT_OK(conn.FetchFormat("SELECT * FROM test WHERE k=1 FOR UPDATE"));
+        MonoTime end = MonoTime::Now();
+        LOG(INFO) << "Piyush - end time picked";
+
+        if (conn.CommitTransaction().ok()) {
+          LOG(INFO) << "Commit succeeded " << i;
+          successful_txns_count++;
+        } else {
+          LOG(INFO) << "Commit failed " << i;
+          failed_txns_count++;
+        }
+        LOG(INFO) << "Thread " << i << " latency of for update=" << (end-start).ToMilliseconds() << "ms";
+      }
+      done.CountDown();
+      successful_txns_count_agg += successful_txns_count;
+      failed_txns_count_agg += failed_txns_count;
+      ASSERT_TRUE(done.WaitFor((100s) * kTimeMultiplier));
+    });
+  }
+
+  thread_holder.WaitAndStop((100s) * kTimeMultiplier);
+  LOG(INFO) << "test_duration= " << test_duration << " kClients=" << kClients
+            << " successful_txns_count_agg=" << successful_txns_count_agg
+            << " failed_txns_count_agg=" << failed_txns_count_agg;
+}
 
 class PgPessimisticLockingTest : public PgMiniTestBase {
  protected:

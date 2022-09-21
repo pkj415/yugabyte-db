@@ -1,0 +1,265 @@
+Parsed test spec with 2 sessions
+
+starting permutation: s1_priority s2_priority s1_begin_rc_method1 s2_begin_sr_method1 s1_switch_to_rr s2_switch_to_rr s1_select s2_select s1_update s2_update s1_commit s2_rollback s2_select
+default_transaction_isolation
+
+read committed 
+default_transaction_isolation
+
+read committed 
+step s1_priority: SET yb_transaction_priority_lower_bound = 0.6;
+step s2_priority: SET yb_transaction_priority_upper_bound = 0.4;
+step s1_begin_rc_method1: BEGIN TRANSACTION ISOLATION LEVEL READ COMMITTED;
+step s2_begin_sr_method1: BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE;
+step s1_switch_to_rr: SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+step s2_switch_to_rr: SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+step s1_select: SELECT * FROM test;
+ERROR:  Illegal state: Attempt to change effective isolation from 3 to SNAPSHOT_ISOLATION in the middle of a transaction. Postgres-level isolation: REPEATABLE_READ; read_only: 0.
+step s2_select: SELECT * FROM test;
+k              v              
+
+1              1              
+step s1_update: UPDATE test SET v=5 WHERE k=1;
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+step s2_update: UPDATE test SET v=10 WHERE k=1;
+step s1_commit: COMMIT;
+step s2_rollback: ROLLBACK;
+step s2_select: SELECT * FROM test;
+k              v              
+
+1              1              
+
+starting permutation: s1_priority s2_priority s1_begin_rc_method2 s2_begin_sr_method2 s1_switch_to_rr s2_switch_to_rr s1_select s2_select s1_update s2_update s1_commit s2_rollback s2_select
+default_transaction_isolation
+
+read committed 
+default_transaction_isolation
+
+read committed 
+step s1_priority: SET yb_transaction_priority_lower_bound = 0.6;
+step s2_priority: SET yb_transaction_priority_upper_bound = 0.4;
+step s1_begin_rc_method2: BEGIN; SET TRANSACTION ISOLATION LEVEL READ COMMITTED;
+step s2_begin_sr_method2: BEGIN; SET TRANSACTION ISOLATION LEVEL SERIALIZABLE;
+step s1_switch_to_rr: SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+step s2_switch_to_rr: SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+step s1_select: SELECT * FROM test;
+ERROR:  Illegal state: Attempt to change effective isolation from 3 to SNAPSHOT_ISOLATION in the middle of a transaction. Postgres-level isolation: REPEATABLE_READ; read_only: 0.
+step s2_select: SELECT * FROM test;
+ERROR:  Illegal state: Attempt to change effective isolation from 3 to SNAPSHOT_ISOLATION in the middle of a transaction. Postgres-level isolation: REPEATABLE_READ; read_only: 0.
+step s1_update: UPDATE test SET v=5 WHERE k=1;
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+step s2_update: UPDATE test SET v=10 WHERE k=1;
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+step s1_commit: COMMIT;
+step s2_rollback: ROLLBACK;
+step s2_select: SELECT * FROM test;
+k              v              
+
+1              1              
+
+starting permutation: s1_priority s2_priority s1_begin_rc_method3 s2_begin_sr_method3 s1_switch_to_rr s2_switch_to_rr s1_select s2_select s1_update s2_update s1_commit s2_rollback s2_select
+default_transaction_isolation
+
+read committed 
+default_transaction_isolation
+
+read committed 
+step s1_priority: SET yb_transaction_priority_lower_bound = 0.6;
+step s2_priority: SET yb_transaction_priority_upper_bound = 0.4;
+step s1_begin_rc_method3: SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL READ COMMITTED; BEGIN;
+step s2_begin_sr_method3: SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL SERIALIZABLE; BEGIN;
+step s1_switch_to_rr: SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+step s2_switch_to_rr: SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+step s1_select: SELECT * FROM test;
+ERROR:  Illegal state: Attempt to change effective isolation from 3 to SNAPSHOT_ISOLATION in the middle of a transaction. Postgres-level isolation: REPEATABLE_READ; read_only: 0.
+step s2_select: SELECT * FROM test;
+ERROR:  Illegal state: Attempt to change effective isolation from 3 to SNAPSHOT_ISOLATION in the middle of a transaction. Postgres-level isolation: REPEATABLE_READ; read_only: 0.
+step s1_update: UPDATE test SET v=5 WHERE k=1;
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+step s2_update: UPDATE test SET v=10 WHERE k=1;
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+step s1_commit: COMMIT;
+step s2_rollback: ROLLBACK;
+step s2_select: SELECT * FROM test;
+k              v              
+
+1              1              
+
+starting permutation: s1_priority s2_priority s1_begin_rc_method4 s2_begin_sr_method4 s1_switch_to_rr s2_switch_to_rr s1_select s2_select s1_update s2_update s1_commit s2_rollback s2_select
+default_transaction_isolation
+
+read committed 
+default_transaction_isolation
+
+read committed 
+step s1_priority: SET yb_transaction_priority_lower_bound = 0.6;
+step s2_priority: SET yb_transaction_priority_upper_bound = 0.4;
+step s1_begin_rc_method4: SET default_transaction_isolation='READ COMMITTED'; BEGIN;
+step s2_begin_sr_method4: SET default_transaction_isolation='SERIALIZABLE'; BEGIN;
+step s1_switch_to_rr: SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+step s2_switch_to_rr: SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+step s1_select: SELECT * FROM test;
+ERROR:  Illegal state: Attempt to change effective isolation from 3 to SNAPSHOT_ISOLATION in the middle of a transaction. Postgres-level isolation: REPEATABLE_READ; read_only: 0.
+step s2_select: SELECT * FROM test;
+ERROR:  Illegal state: Attempt to change effective isolation from 3 to SNAPSHOT_ISOLATION in the middle of a transaction. Postgres-level isolation: REPEATABLE_READ; read_only: 0.
+step s1_update: UPDATE test SET v=5 WHERE k=1;
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+step s2_update: UPDATE test SET v=10 WHERE k=1;
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+step s1_commit: COMMIT;
+step s2_rollback: ROLLBACK;
+step s2_select: SELECT * FROM test;
+k              v              
+
+1              1              
+
+starting permutation: s1_priority s2_priority s1_begin_rr_method1 s2_begin_sr_method1 s1_switch_to_rc s2_switch_to_rc s1_select s2_select s1_update s2_update s1_commit s2_rollback s2_select
+default_transaction_isolation
+
+read committed 
+default_transaction_isolation
+
+read committed 
+step s1_priority: SET yb_transaction_priority_lower_bound = 0.6;
+step s2_priority: SET yb_transaction_priority_upper_bound = 0.4;
+step s1_begin_rr_method1: BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+step s2_begin_sr_method1: BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE;
+step s1_switch_to_rc: SET TRANSACTION ISOLATION LEVEL READ COMMITTED;
+step s2_switch_to_rc: SET TRANSACTION ISOLATION LEVEL READ COMMITTED;
+step s1_select: SELECT * FROM test;
+k              v              
+
+1              1              
+step s2_select: SELECT * FROM test;
+k              v              
+
+1              1              
+step s1_update: UPDATE test SET v=5 WHERE k=1;
+step s2_update: UPDATE test SET v=10 WHERE k=1; <waiting ...>
+step s1_commit: COMMIT;
+step s2_update: <... completed>
+step s2_rollback: ROLLBACK;
+step s2_select: SELECT * FROM test;
+k              v              
+
+1              5              
+
+starting permutation: s1_priority s2_priority s1_begin_rr_method2 s2_begin_sr_method2 s1_switch_to_rc s2_switch_to_rc s1_select s2_select s1_update s2_update s1_commit s2_rollback s2_select
+default_transaction_isolation
+
+read committed 
+default_transaction_isolation
+
+read committed 
+step s1_priority: SET yb_transaction_priority_lower_bound = 0.6;
+step s2_priority: SET yb_transaction_priority_upper_bound = 0.4;
+step s1_begin_rr_method2: BEGIN; SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+step s2_begin_sr_method2: BEGIN; SET TRANSACTION ISOLATION LEVEL SERIALIZABLE;
+step s1_switch_to_rc: SET TRANSACTION ISOLATION LEVEL READ COMMITTED;
+step s2_switch_to_rc: SET TRANSACTION ISOLATION LEVEL READ COMMITTED;
+step s1_select: SELECT * FROM test;
+k              v              
+
+1              1              
+step s2_select: SELECT * FROM test;
+k              v              
+
+1              1              
+step s1_update: UPDATE test SET v=5 WHERE k=1;
+step s2_update: UPDATE test SET v=10 WHERE k=1; <waiting ...>
+step s1_commit: COMMIT;
+step s2_update: <... completed>
+step s2_rollback: ROLLBACK;
+step s2_select: SELECT * FROM test;
+k              v              
+
+1              5              
+
+starting permutation: s1_priority s2_priority s1_begin_rr_method3 s2_begin_sr_method3 s1_switch_to_rc s2_switch_to_rc s1_select s2_select s1_update s2_update s1_commit s2_rollback s2_select
+default_transaction_isolation
+
+read committed 
+default_transaction_isolation
+
+read committed 
+step s1_priority: SET yb_transaction_priority_lower_bound = 0.6;
+step s2_priority: SET yb_transaction_priority_upper_bound = 0.4;
+step s1_begin_rr_method3: SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL REPEATABLE READ; BEGIN;
+step s2_begin_sr_method3: SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL SERIALIZABLE; BEGIN;
+step s1_switch_to_rc: SET TRANSACTION ISOLATION LEVEL READ COMMITTED;
+step s2_switch_to_rc: SET TRANSACTION ISOLATION LEVEL READ COMMITTED;
+step s1_select: SELECT * FROM test;
+k              v              
+
+1              1              
+step s2_select: SELECT * FROM test;
+k              v              
+
+1              1              
+step s1_update: UPDATE test SET v=5 WHERE k=1;
+step s2_update: UPDATE test SET v=10 WHERE k=1; <waiting ...>
+step s1_commit: COMMIT;
+step s2_update: <... completed>
+step s2_rollback: ROLLBACK;
+step s2_select: SELECT * FROM test;
+k              v              
+
+1              5              
+
+starting permutation: s1_priority s2_priority s1_begin_rr_method4 s2_begin_sr_method4 s1_switch_to_rc s2_switch_to_rc s1_select s2_select s1_update s2_update s1_commit s2_rollback s2_select
+default_transaction_isolation
+
+repeatable read
+default_transaction_isolation
+
+read committed 
+step s1_priority: SET yb_transaction_priority_lower_bound = 0.6;
+step s2_priority: SET yb_transaction_priority_upper_bound = 0.4;
+step s1_begin_rr_method4: SET default_transaction_isolation='REPEATABLE READ'; BEGIN;
+step s2_begin_sr_method4: SET default_transaction_isolation='SERIALIZABLE'; BEGIN;
+step s1_switch_to_rc: SET TRANSACTION ISOLATION LEVEL READ COMMITTED;
+step s2_switch_to_rc: SET TRANSACTION ISOLATION LEVEL READ COMMITTED;
+step s1_select: SELECT * FROM test;
+k              v              
+
+1              1              
+step s2_select: SELECT * FROM test;
+k              v              
+
+1              1              
+step s1_update: UPDATE test SET v=5 WHERE k=1;
+step s2_update: UPDATE test SET v=10 WHERE k=1; <waiting ...>
+step s1_commit: COMMIT;
+step s2_update: <... completed>
+step s2_rollback: ROLLBACK;
+step s2_select: SELECT * FROM test;
+k              v              
+
+1              5              
+
+starting permutation: s1_priority s2_priority s1_begin_rc_method1 s2_begin_rr_method1 s1_switch_to_sr s2_switch_to_sr s1_select s2_select s1_update s2_update s1_commit s2_rollback s2_select
+default_transaction_isolation
+
+repeatable read
+default_transaction_isolation
+
+read committed 
+step s1_priority: SET yb_transaction_priority_lower_bound = 0.6;
+step s2_priority: SET yb_transaction_priority_upper_bound = 0.4;
+step s1_begin_rc_method1: BEGIN TRANSACTION ISOLATION LEVEL READ COMMITTED;
+step s2_begin_rr_method1: BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+step s1_switch_to_sr: SET TRANSACTION ISOLATION LEVEL SERIALIZABLE;
+step s2_switch_to_sr: SET TRANSACTION ISOLATION LEVEL SERIALIZABLE;
+step s1_select: SELECT * FROM test;
+ERROR:  Illegal state: Attempt to change effective isolation from 3 to SERIALIZABLE_ISOLATION in the middle of a transaction. Postgres-level isolation: SERIALIZABLE; read_only: 0.
+step s2_select: SELECT * FROM test;
+k              v              
+
+1              1              
+step s1_update: UPDATE test SET v=5 WHERE k=1;
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+step s2_update: UPDATE test SET v=10 WHERE k=1;
+PQconsumeInput failed: server closed the connection unexpectedly
+	This probably means the server terminated abnormally
+	before or while processing the request.
+

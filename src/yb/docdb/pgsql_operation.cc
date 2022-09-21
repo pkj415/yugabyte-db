@@ -1058,6 +1058,7 @@ Result<size_t> PgsqlReadOperation::ExecuteSample(const YQLStorageIf& ql_storage,
   }
   // Count live rows we have scanned TODO how to count dead rows?
   samplerows += scanned_rows - 1;
+  LOG(INFO) << "Piyush - scanned " << scanned_rows << " more rows. Total at: " << samplerows;
   // Return collected tuples from the reservoir.
   // Tuples are returned as (index, ybctid) pairs, where index is in [0..targrows-1] range.
   // As mentioned above, for large tables reservoirs become increasingly sparse from page to page.

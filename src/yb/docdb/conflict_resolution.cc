@@ -273,7 +273,7 @@ class ConflictResolver : public std::enable_shared_from_this<ConflictResolver> {
       auto existing_intent = VERIFY_RESULT(
           docdb::ParseIntentKey(intent_iter_.key(), existing_value));
 
-      VLOG_WITH_PREFIX_AND_FUNC(4) << "Found: " << existing_value.ToDebugString()
+      VLOG_WITH_PREFIX_AND_FUNC(4) << "Piyush - Found: " << existing_value.ToDebugString()
                                    << " has intent types " << ToString(existing_intent.types);
       auto decoded_value = VERIFY_RESULT(DecodeIntentValue(
           existing_value, nullptr /* verify_transaction_id_slice */,
@@ -347,7 +347,7 @@ class ConflictResolver : public std::enable_shared_from_this<ConflictResolver> {
   }
 
   void ResolveConflicts() {
-    VLOG_WITH_PREFIX(3) << "Conflicts: " << yb::ToString(conflicts_);
+    LOG_WITH_PREFIX(INFO) << "Piyush - Conflicts: " << yb::ToString(conflicts_);
     if (conflicts_.empty()) {
       VTRACE(1, LogPrefix());
       TRACE("No conflicts.");

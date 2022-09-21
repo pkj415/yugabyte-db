@@ -176,6 +176,7 @@ Status PgDocResult::ProcessSparseSystemColumns(std::string *reservoir) {
   // predetermined size. DocDB returns ybctids with sequential indexes first, starting from 0 and
   // until reservoir is full. Then it returns ybctids with random indexes, so they replace previous
   // ybctids.
+  LOG(INFO) << "Piyush - ProcessSparseSystemColumns got " << row_count_ << " rows";
   for (int i = 0; i < row_count_; i++) {
     // Read index column
     PgWireDataHeader header = PgDocData::ReadDataHeader(&row_iterator_);

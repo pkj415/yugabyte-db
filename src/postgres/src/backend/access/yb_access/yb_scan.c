@@ -2700,6 +2700,7 @@ ybSampleNextBlock(YbSample ybSample)
 {
 	bool has_more;
 	HandleYBStatus(YBCPgSampleNextBlock(ybSample->handle, &has_more));
+	elog(LOG, "Piyush - ybSampleNextBlock has_more=%d", has_more);
 	return has_more;
 }
 

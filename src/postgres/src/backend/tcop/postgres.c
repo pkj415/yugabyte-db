@@ -4573,7 +4573,7 @@ yb_exec_query_wrapper_one_attempt(
 	int attempt,
 	bool* retry)
 {
-	elog(DEBUG2, "yb_exec_query_wrapper attempt %d for %s", attempt, restart_data->query_string);
+	elog(LOG, "yb_exec_query_wrapper attempt %d for %s", attempt, restart_data->query_string);
 	YBSaveOutputBufferPosition(
 		!yb_is_begin_transaction(restart_data->command_tag));
 	PG_TRY();

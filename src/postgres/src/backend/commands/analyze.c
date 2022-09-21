@@ -1574,6 +1574,7 @@ yb_acquire_sample_rows(Relation onerel, int elevel,
 	ybSample = ybBeginSample(onerel, targrows);
 
 	/* Loop over the table blocks until sample is selected */
+	// ybSampleNextBlock(ybSample);
 	while (ybSampleNextBlock(ybSample)) {
 		vacuum_delay_point();
 	}

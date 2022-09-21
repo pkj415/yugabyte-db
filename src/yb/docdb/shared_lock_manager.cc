@@ -346,6 +346,7 @@ SharedLockManager::SharedLockManager() : impl_(new Impl) {
 SharedLockManager::~SharedLockManager() {}
 
 bool SharedLockManager::Lock(LockBatchEntries* key_to_intent_type, CoarseTimePoint deadline) {
+  LOG(INFO) << "Piyush - SharedLockManager::Lock()";
   return impl_->Lock(key_to_intent_type, deadline);
 }
 
