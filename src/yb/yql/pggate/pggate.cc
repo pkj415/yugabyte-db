@@ -1695,9 +1695,9 @@ void PgApiImpl::ClearSeparateDdlTxnMode() {
   CHECK_OK(pg_txn_manager_->ExitSeparateDdlTxnMode(Commit::kFalse));
 }
 
-Status PgApiImpl::SetActiveSubTransaction(SubTransactionId id) {
+Status PgApiImpl::SetActiveSubTransaction(SubTransactionId id, bool yb_send_active_sub_txn_rpc) {
   RETURN_NOT_OK(pg_session_->FlushBufferedOperations());
-  return pg_session_->SetActiveSubTransaction(id);
+  return pg_session_->SetActiveSubTransaction(id, yb_send_active_sub_txn_rpc);
 }
 
 Status PgApiImpl::RollbackToSubTransaction(SubTransactionId id) {

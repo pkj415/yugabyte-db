@@ -1885,7 +1885,9 @@ AtSubCleanup_Memory(void)
 
 static void
 YBUpdateActiveSubTransaction(TransactionState s) {
+	elog(LOG, "Piyush - before YBCSetActiveSubTransaction");
 	YBCSetActiveSubTransaction(s->subTransactionId);
+	elog(LOG, "Piyush - after YBCSetActiveSubTransaction");
 }
 
 /*

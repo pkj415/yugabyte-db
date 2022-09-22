@@ -533,7 +533,7 @@ class PgApiImpl {
   bool HasWriteOperationsInDdlTxnMode() const;
   Status ExitSeparateDdlTxnMode();
   void ClearSeparateDdlTxnMode();
-  Status SetActiveSubTransaction(SubTransactionId id);
+  Status SetActiveSubTransaction(SubTransactionId id, bool yb_send_active_sub_txn_rpc);
   Status RollbackToSubTransaction(SubTransactionId id);
   double GetTransactionPriority() const;
   TxnPriorityRequirement GetTransactionPriorityType() const;

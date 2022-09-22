@@ -312,7 +312,7 @@ class PgSession : public RefCountedThreadSafe<PgSession> {
 
   bool ShouldUseFollowerReads() const;
 
-  Status SetActiveSubTransaction(SubTransactionId id);
+  Status SetActiveSubTransaction(SubTransactionId id, bool yb_send_active_sub_txn_rpc);
   Status RollbackToSubTransaction(SubTransactionId id);
 
   void ResetHasWriteOperationsInDdlMode();

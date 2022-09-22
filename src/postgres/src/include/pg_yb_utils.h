@@ -207,6 +207,7 @@ extern bool YBTransactionsEnabled();
  * condition is dictated by the value of gflag yb_enable_read_committed_isolation.
  */
 extern bool IsYBReadCommitted();
+extern bool IsSendActiveSubTxnRpc();
 
 /*
  * Whether to allow users to use SAVEPOINT commands at the query layer.

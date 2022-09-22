@@ -490,7 +490,7 @@ YBCStatus YBCPgEnterSeparateDdlTxnMode();
 bool YBCPgHasWriteOperationsInDdlTxnMode();
 YBCStatus YBCPgExitSeparateDdlTxnMode();
 void YBCPgClearSeparateDdlTxnMode();
-YBCStatus YBCPgSetActiveSubTransaction(uint32_t id);
+YBCStatus YBCPgSetActiveSubTransaction(uint32_t id, bool yb_send_active_sub_txn_rpc);
 YBCStatus YBCPgRollbackToSubTransaction(uint32_t id);
 double YBCGetTransactionPriority();
 TxnPriorityRequirement YBCGetTransactionPriorityType();

@@ -1147,8 +1147,8 @@ void YBCPgClearSeparateDdlTxnMode() {
   pgapi->ClearSeparateDdlTxnMode();
 }
 
-YBCStatus YBCPgSetActiveSubTransaction(uint32_t id) {
-  return ToYBCStatus(pgapi->SetActiveSubTransaction(id));
+YBCStatus YBCPgSetActiveSubTransaction(uint32_t id, bool yb_send_active_sub_txn_rpc) {
+  return ToYBCStatus(pgapi->SetActiveSubTransaction(id, yb_send_active_sub_txn_rpc));
 }
 
 YBCStatus YBCPgRollbackToSubTransaction(uint32_t id) {

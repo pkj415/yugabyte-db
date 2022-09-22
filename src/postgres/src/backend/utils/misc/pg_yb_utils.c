@@ -370,6 +370,17 @@ IsYBReadCommitted()
 }
 
 bool
+IsSendActiveSubTxnRpc()
+{
+	static int cached_value = -1;
+	if (cached_value == -1)
+	{
+		cached_value = YBCIsEnvVarTrueWithDefault("FLAGS_yb_send_active_sub_txn_rpc", false);
+	}
+	return cached_value;
+}
+
+bool
 YBSavepointsEnabled()
 {
 	static int cached_value = -1;
@@ -594,7 +605,7 @@ void
 YBCSetActiveSubTransaction(SubTransactionId id)
 {
 	if (YBSavepointsEnabled())
-		HandleYBStatus(YBCPgSetActiveSubTransaction(id));
+		HandleYBStatus(YBCPgSetActiveSubTransaction(id, IsSendActiveSubTxnRpc()));
 }
 
 void
