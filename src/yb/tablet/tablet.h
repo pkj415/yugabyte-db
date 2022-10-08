@@ -373,7 +373,8 @@ class Tablet : public AbstractTablet, public TransactionIntentApplier {
       const TransactionMetadataPB& transaction_metadata,
       const SubTransactionMetadataPB& subtransaction_metadata,
       PgsqlReadRequestResult* result,
-      size_t* num_rows_read) override;
+      size_t* num_rows_read,
+      uint64_t trace_id) override;
 
   Status CreatePagingStateForRead(
       const PgsqlReadRequestPB& pgsql_read_request, const size_t row_count,
@@ -591,7 +592,8 @@ class Tablet : public AbstractTablet, public TransactionIntentApplier {
       const SubTransactionMetadataPB& subtransaction_metadata,
       const google::protobuf::RepeatedPtrField<QLReadRequestPB>& ql_batch,
       const google::protobuf::RepeatedPtrField<PgsqlReadRequestPB>& pgsql_batch,
-      docdb::KeyValueWriteBatchPB* out);
+      docdb::KeyValueWriteBatchPB* out,
+      uint64_t trace_id);
 
   uint64_t GetCurrentVersionSstFilesSize() const;
   uint64_t GetCurrentVersionSstFilesUncompressedSize() const;

@@ -108,9 +108,11 @@ Status QLRocksDBStorage::CreateIterator(
     const TransactionOperationContext& txn_op_context,
     CoarseTimePoint deadline,
     const ReadHybridTime& read_time,
-    YQLRowwiseIteratorIf::UniPtr* iter) const {
+    YQLRowwiseIteratorIf::UniPtr* iter,
+    uint64_t trace_id) const {
   auto doc_iter = std::make_unique<DocRowwiseIterator>(
-      projection, doc_read_context, txn_op_context, doc_db_, deadline, read_time);
+      projection, doc_read_context, txn_op_context, doc_db_, deadline, read_time,
+      nullptr, trace_id);
   *iter = std::move(doc_iter);
   return Status::OK();
 }
@@ -135,11 +137,13 @@ Status QLRocksDBStorage::GetIterator(
     CoarseTimePoint deadline,
     const ReadHybridTime& read_time,
     const QLValuePB& ybctid,
-    YQLRowwiseIteratorIf::UniPtr* iter) const {
+    YQLRowwiseIteratorIf::UniPtr* iter,
+    uint64_t trace_id) const {
   DocKey range_doc_key(doc_read_context.get().schema);
   RETURN_NOT_OK(range_doc_key.DecodeFrom(ybctid.binary_value()));
   auto doc_iter = std::make_unique<DocRowwiseIterator>(
-      projection, doc_read_context, txn_op_context, doc_db_, deadline, read_time);
+      projection, doc_read_context, txn_op_context, doc_db_, deadline, read_time,
+      nullptr, trace_id);
   RETURN_NOT_OK(doc_iter->Init(
       DocPgsqlScanSpec(doc_read_context.get().schema, stmt_id, range_doc_key)));
   *iter = std::move(doc_iter);
@@ -154,7 +158,8 @@ Status QLRocksDBStorage::GetIterator(
     CoarseTimePoint deadline,
     const ReadHybridTime& read_time,
     const DocKey& start_doc_key,
-    YQLRowwiseIteratorIf::UniPtr* iter) const {
+    YQLRowwiseIteratorIf::UniPtr* iter,
+    uint64_t trace_id) const {
   const auto& schema = doc_read_context.get().schema;
   // Populate dockey from QL key columns.
   auto hashed_components = VERIFY_RESULT(InitKeyColumnPrimitiveValues(
@@ -164,7 +169,8 @@ Status QLRocksDBStorage::GetIterator(
       request.range_column_values(), schema, schema.num_hash_key_columns()));
 
   auto doc_iter = std::make_unique<DocRowwiseIterator>(
-      projection, doc_read_context, txn_op_context, doc_db_, deadline, read_time);
+      projection, doc_read_context, txn_op_context, doc_db_, deadline, read_time,
+      nullptr, trace_id);
 
   if (range_components.size() == schema.num_range_key_columns()) {
     // Construct the scan spec basing on the RANGE condition as all range columns are specified.

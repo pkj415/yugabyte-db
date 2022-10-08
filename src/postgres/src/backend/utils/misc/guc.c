@@ -4375,6 +4375,16 @@ static struct config_string ConfigureNamesString[] =
 		NULL, NULL, NULL
 	},
 
+	// {
+	// 	{"trace_uuid", PGC_USERSET, DEVELOPER_OPTIONS,
+	// 		gettext_noop("Trace UUID to prefix logs with unique identifier across the cluster"),
+	// 		gettext_noop("Pass a valid UUID4"),
+	// 	},
+	// 	&trace_uuid,
+	// 	"llvmjit",
+	// 	NULL, NULL, NULL
+	// },
+
 	/* End-of-list marker */
 	{
 		{NULL, 0, 0, NULL, NULL}, NULL, NULL, NULL, NULL, NULL

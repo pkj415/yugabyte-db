@@ -41,6 +41,7 @@
 
 #include "yb/util/algorithm_util.h"
 #include "yb/util/flag_tags.h"
+#include "yb/util/logging.h"
 #include "yb/util/result.h"
 #include "yb/util/scope_exit.h"
 #include "yb/util/status_format.h"
@@ -188,7 +189,8 @@ Result<YQLRowwiseIteratorIf::UniPtr> CreateIterator(
     const TransactionOperationContext& txn_op_context,
     CoarseTimePoint deadline,
     const ReadHybridTime& read_time,
-    bool is_explicit_request_read_time) {
+    bool is_explicit_request_read_time,
+    uint64_t trace_id) {
   VLOG_IF(2, request.is_for_backfill()) << "Creating iterator for " << yb::ToString(request);
 
   YQLRowwiseIteratorIf::UniPtr result;
@@ -202,7 +204,8 @@ Result<YQLRowwiseIteratorIf::UniPtr> CreateIterator(
            "is only used for multi-row queries.");
     RETURN_NOT_OK(ql_storage.GetIterator(
         request.stmt_id(), projection, doc_read_context, txn_op_context,
-        deadline, read_time, request.ybctid_column_value().value(), &result));
+        deadline, read_time, request.ybctid_column_value().value(), &result,
+        trace_id));
   } else {
     SubDocKey start_sub_doc_key;
     auto actual_read_time = read_time;
@@ -232,7 +235,8 @@ Result<YQLRowwiseIteratorIf::UniPtr> CreateIterator(
     }
     RETURN_NOT_OK(ql_storage.GetIterator(
         request, projection, doc_read_context, txn_op_context,
-        deadline, read_time, start_sub_doc_key.doc_key(), &result));
+        deadline, read_time, start_sub_doc_key.doc_key(), &result,
+        trace_id));
   }
   return std::move(result);
 }
@@ -351,6 +355,10 @@ class PgsqlWriteOperation::RowPackContext {
 
 //--------------------------------------------------------------------------------------------------
 
+std::string PgsqlWriteOperation::LogPrefix() const {
+  return Format("-$0- ", trace_id_);
+}
+
 Status PgsqlWriteOperation::Init(PgsqlResponsePB* response) {
   // Initialize operation inputs.
   response_ = response;
@@ -363,7 +371,7 @@ Status PgsqlWriteOperation::Init(PgsqlResponsePB* response) {
 
 // Check if a duplicate value is inserted into a unique index.
 Result<bool> PgsqlWriteOperation::HasDuplicateUniqueIndexValue(const DocOperationApplyData& data) {
-  VLOG(3) << "Looking for collisions in\n" << docdb::DocDBDebugDumpToStr(
+  VLOG_WITH_PREFIX(3) << "Looking for collisions in\n" << docdb::DocDBDebugDumpToStr(
       data.doc_write_batch->doc_db(), SchemaPackingStorage());
   // We need to check backwards only for backfilled entries.
   bool ret =
@@ -371,14 +379,14 @@ Result<bool> PgsqlWriteOperation::HasDuplicateUniqueIndexValue(const DocOperatio
       (request_.is_backfill() &&
        VERIFY_RESULT(HasDuplicateUniqueIndexValue(data, Direction::kBackward)));
   if (!ret) {
-    VLOG(3) << "No collisions found";
+    VLOG_WITH_PREFIX(3) << "No collisions found";
   }
   return ret;
 }
 
 Result<bool> PgsqlWriteOperation::HasDuplicateUniqueIndexValue(
     const DocOperationApplyData& data, Direction direction) {
-  VLOG(2) << "Looking for collision while going " << yb::ToString(direction)
+  VLOG_WITH_PREFIX(2) << "Looking for collision while going " << yb::ToString(direction)
           << ". Trying to insert " << *doc_key_;
   auto requested_read_time = data.read_time;
   if (direction == Direction::kForward) {
@@ -424,7 +432,7 @@ Result<bool> PgsqlWriteOperation::HasDuplicateUniqueIndexValue(
   // It is a duplicate value if the index key exists already and the index value (corresponding to
   // the indexed table's primary key) is not the same.
   if (!VERIFY_RESULT(iterator.HasNext())) {
-    VLOG(2) << "No collision found while checking at " << yb::ToString(read_time);
+    VLOG_WITH_PREFIX(2) << "No collision found while checking at " << yb::ToString(read_time);
     return false;
   }
 
@@ -448,17 +456,17 @@ Result<bool> PgsqlWriteOperation::HasDuplicateUniqueIndexValue(
     boost::optional<const QLValuePB&> existing_value = table_row.GetValue(column_id);
     const QLValuePB& new_value = expr_result.Value();
     if (existing_value && *existing_value != new_value) {
-      VLOG(2) << "Found collision while checking at " << yb::ToString(read_time)
+      VLOG_WITH_PREFIX(2) << "Found collision while checking at " << yb::ToString(read_time)
               << "\nExisting: " << yb::ToString(*existing_value)
               << " vs New: " << yb::ToString(new_value)
               << "\nUsed read time as " << yb::ToString(data.read_time);
-      DVLOG(3) << "DocDB is now:\n" << docdb::DocDBDebugDumpToStr(
+      DVLOG_WITH_PREFIX(3) << "DocDB is now:\n" << docdb::DocDBDebugDumpToStr(
           data.doc_write_batch->doc_db(), SchemaPackingStorage());
       return true;
     }
   }
 
-  VLOG(2) << "No collision while checking at " << yb::ToString(read_time);
+  VLOG_WITH_PREFIX(2) << "No collision while checking at " << yb::ToString(read_time);
   return false;
 }
 
@@ -467,23 +475,23 @@ Result<HybridTime> PgsqlWriteOperation::FindOldestOverwrittenTimestamp(
     const SubDocKey& sub_doc_key,
     HybridTime min_read_time) {
   HybridTime result;
-  VLOG(3) << "Doing iter->Seek " << *doc_key_;
+  VLOG_WITH_PREFIX(3) << "Doing iter->Seek " << *doc_key_;
   iter->Seek(*doc_key_);
   if (iter->valid()) {
     const KeyBytes bytes = sub_doc_key.EncodeWithoutHt();
     const Slice& sub_key_slice = bytes.AsSlice();
     result = VERIFY_RESULT(
         iter->FindOldestRecord(sub_key_slice, min_read_time));
-    VLOG(2) << "iter->FindOldestRecord returned " << result << " for "
+    VLOG_WITH_PREFIX(2) << "iter->FindOldestRecord returned " << result << " for "
             << SubDocKey::DebugSliceToString(sub_key_slice);
   } else {
-    VLOG(3) << "iter->Seek " << *doc_key_ << " turned out to be invalid";
+    VLOG_WITH_PREFIX(3) << "iter->Seek " << *doc_key_ << " turned out to be invalid";
   }
   return result;
 }
 
 Status PgsqlWriteOperation::Apply(const DocOperationApplyData& data) {
-  VLOG(4) << "Write, read time: " << data.read_time << ", txn: " << txn_op_context_;
+  VLOG_WITH_PREFIX(4) << "Write, read time: " << data.read_time << ", txn: " << txn_op_context_;
 
   auto scope_exit = ScopeExit([this] {
     if (!result_buffer_.empty()) {
@@ -559,7 +567,7 @@ Status PgsqlWriteOperation::ApplyInsert(const DocOperationApplyData& data, IsUps
       // - retrieving and calculating whether the conflicting row matches is a waste
       RETURN_NOT_OK(ReadColumns(data, &table_row));
       if (!table_row.IsEmpty()) {
-        VLOG(4) << "Duplicate row: " << table_row.ToString();
+        VLOG_WITH_PREFIX(4) << "Duplicate row: " << table_row.ToString();
         // Primary key or unique index value found.
         response_->set_status(PgsqlResponsePB::PGSQL_STATUS_DUPLICATE_KEY_ERROR);
         response_->set_error_message("Duplicate key found in primary key or unique index");
@@ -938,6 +946,10 @@ Status PgsqlWriteOperation::GetDocPaths(GetDocPathsMode mode,
 
 //--------------------------------------------------------------------------------------------------
 
+std::string PgsqlReadOperation::LogPrefix() const {
+  return Format("-$0- ", trace_id_);
+}
+
 Result<size_t> PgsqlReadOperation::Execute(const YQLStorageIf& ql_storage,
                                            CoarseTimePoint deadline,
                                            const ReadHybridTime& read_time,
@@ -952,7 +964,7 @@ Result<size_t> PgsqlReadOperation::Execute(const YQLStorageIf& ql_storage,
   auto se = ScopeExit([&fetched_rows, result_buffer] {
     NetworkByteOrder::Store64(result_buffer->data(), fetched_rows);
   });
-  VLOG(4) << "Read, read time: " << read_time << ", txn: " << txn_op_context_;
+  VLOG_WITH_PREFIX(4) << "Read, read time: " << read_time << ", txn: " << txn_op_context_;
 
   // Fetching data.
   bool has_paging_state = false;
@@ -1019,7 +1031,8 @@ Result<size_t> PgsqlReadOperation::ExecuteSample(const YQLStorageIf& ql_storage,
   // Request may carry paging state, CreateIterator takes care of positioning
   table_iter_ = VERIFY_RESULT(CreateIterator(
       ql_storage, request_, projection, doc_read_context, txn_op_context_,
-      deadline, read_time, is_explicit_request_read_time));
+      deadline, read_time, is_explicit_request_read_time,
+      trace_id_));
   bool scan_time_exceeded = false;
   CoarseTimePoint stop_scan = deadline - FLAGS_ysql_scan_deadline_margin_ms * 1ms;
   while (scanned_rows++ < row_count_limit &&
@@ -1138,11 +1151,11 @@ Result<size_t> PgsqlReadOperation::ExecuteScalar(const YQLStorageIf& ql_storage,
   // Initialize the main executor with info from the read request
   for (const PgsqlColRefPB& column_ref : request_.col_refs()) {
     RETURN_NOT_OK(doc_expr_exec.AddColumnRef(column_ref));
-    VLOG(1) << "Added column reference to the executor";
+    VLOG_WITH_PREFIX(1) << "Added column reference to the executor";
   }
   for (const PgsqlExpressionPB& expr : request_.where_clauses()) {
     RETURN_NOT_OK(doc_expr_exec.AddWhereExpression(expr));
-    VLOG(1) << "Added where expression to the executor";
+    VLOG_WITH_PREFIX(1) << "Added where expression to the executor";
   }
 
   // Old code might send column references using the deprecated column_refs field. Values in this
@@ -1158,7 +1171,7 @@ Result<size_t> PgsqlReadOperation::ExecuteScalar(const YQLStorageIf& ql_storage,
   // Create iterator over the target table
   table_iter_ = VERIFY_RESULT(CreateIterator(
       ql_storage, request_, doc_projection, doc_read_context, txn_op_context_, deadline, read_time,
-      is_explicit_request_read_time));
+      is_explicit_request_read_time, trace_id_));
 
   ColumnId ybbasectid_id;
   if (request_.has_index_request()) {
@@ -1168,11 +1181,11 @@ Result<size_t> PgsqlReadOperation::ExecuteScalar(const YQLStorageIf& ql_storage,
     const PgsqlReadRequestPB& index_request = request_.index_request();
     for (const PgsqlColRefPB& column_ref : index_request.col_refs()) {
       RETURN_NOT_OK(index_expr_exec.AddColumnRef(column_ref));
-      VLOG(1) << "Added column reference to the index executor";
+      VLOG_WITH_PREFIX(1) << "Added column reference to the index executor";
     }
     for (const PgsqlExpressionPB& expr : index_request.where_clauses()) {
       RETURN_NOT_OK(index_expr_exec.AddWhereExpression(expr));
-      VLOG(1) << "Added where expression to the index executor";
+      VLOG_WITH_PREFIX(1) << "Added where expression to the index executor";
     }
     if (!request_.col_refs().empty()) {
       RETURN_NOT_OK(CreateProjection(*index_schema, index_request.col_refs(), &index_projection));
@@ -1184,7 +1197,8 @@ Result<size_t> PgsqlReadOperation::ExecuteScalar(const YQLStorageIf& ql_storage,
     // Create iterator over the index
     index_iter_ = VERIFY_RESULT(CreateIterator(
         ql_storage, index_request, index_projection, *index_doc_read_context,
-        txn_op_context_, deadline, read_time, is_explicit_request_read_time));
+        txn_op_context_, deadline, read_time, is_explicit_request_read_time,
+        trace_id_));
     // The index iterator is to be looped over, main table rows are to be retrieved by their ybctids
     iter = index_iter_.get();
     const auto idx = index_schema->find_column("ybidxbasectid");
@@ -1195,7 +1209,7 @@ Result<size_t> PgsqlReadOperation::ExecuteScalar(const YQLStorageIf& ql_storage,
     iter = table_iter_.get();
   }
 
-  VLOG(1) << "Started iterator";
+  VLOG_WITH_PREFIX(1) << "Started iterator";
 
   // Set scan end time. We want to iterate as long as we can, but stop before client timeout.
   // The more rows we do per request, the less RPCs will be needed, but if client times out,
@@ -1218,7 +1232,7 @@ Result<size_t> PgsqlReadOperation::ExecuteScalar(const YQLStorageIf& ql_storage,
       RETURN_NOT_OK(index_expr_exec.Exec(row, nullptr, &is_match));
       if (!is_match) {
         // If no match continue with next tuple from the iterator
-        VLOG(1) << "Row filtered out by colocated index condition";
+        VLOG_WITH_PREFIX(1) << "Row filtered out by colocated index condition";
         continue;
       }
       // Index matches the condition, get the ybctid of the target row
@@ -1259,16 +1273,16 @@ Result<size_t> PgsqlReadOperation::ExecuteScalar(const YQLStorageIf& ql_storage,
         ++fetched_rows;
       }
     } else {
-      VLOG(1) << "Row filtered out by the condition";
+      VLOG_WITH_PREFIX(1) << "Row filtered out by the condition";
     }
 
     // Check if we are running out of time
     scan_time_exceeded = CoarseMonoClock::now() >= stop_scan;
   }
 
-  VLOG(1) << "Stopped iterator after " << match_count << " matches, "
+  VLOG_WITH_PREFIX(1) << "Stopped iterator after " << match_count << " matches, "
           << fetched_rows << " rows fetched";
-  VLOG(1) << "Deadline is " << (scan_time_exceeded ? "" : "not ") << "exceeded";
+  VLOG_WITH_PREFIX(1) << "Deadline is " << (scan_time_exceeded ? "" : "not ") << "exceeded";
 
   // Output aggregate values accumulated while looping over rows
   if (request_.is_aggregate() && match_count > 0) {
@@ -1304,11 +1318,11 @@ Result<size_t> PgsqlReadOperation::ExecuteBatchYbctid(const YQLStorageIf& ql_sto
   DocPgExprExecutor expr_exec(&schema);
   for (const PgsqlColRefPB& column_ref : request_.col_refs()) {
     RETURN_NOT_OK(expr_exec.AddColumnRef(column_ref));
-    VLOG(1) << "Added column reference to the executor";
+    VLOG_WITH_PREFIX(1) << "Added column reference to the executor";
   }
   for (const PgsqlExpressionPB& expr : request_.where_clauses()) {
     RETURN_NOT_OK(expr_exec.AddWhereExpression(expr));
-    VLOG(1) << "Added where expression to the executor";
+    VLOG_WITH_PREFIX(1) << "Added where expression to the executor";
   }
 
   for (const PgsqlBatchArgumentPB& batch_argument : request_.batch_arguments()) {
@@ -1318,7 +1332,8 @@ Result<size_t> PgsqlReadOperation::ExecuteBatchYbctid(const YQLStorageIf& ql_sto
     // Get the row.
     RETURN_NOT_OK(ql_storage.GetIterator(
         request_.stmt_id(), projection, doc_read_context, txn_op_context_,
-        deadline, read_time, batch_argument.ybctid().value(), &table_iter_));
+        deadline, read_time, batch_argument.ybctid().value(), &table_iter_,
+        trace_id_));
 
     if (VERIFY_RESULT(table_iter_->HasNext())) {
       row.Clear();

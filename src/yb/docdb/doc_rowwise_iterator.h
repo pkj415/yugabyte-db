@@ -50,7 +50,8 @@ class DocRowwiseIterator : public YQLRowwiseIteratorIf {
                      const DocDB& doc_db,
                      CoarseTimePoint deadline,
                      const ReadHybridTime& read_time,
-                     RWOperationCounter* pending_op_counter = nullptr);
+                     RWOperationCounter* pending_op_counter = nullptr,
+                     uint64_t trace_id = 0);
 
   DocRowwiseIterator(std::unique_ptr<Schema> projection,
                      std::reference_wrapper<const DocReadContext> doc_read_context,
@@ -58,12 +59,15 @@ class DocRowwiseIterator : public YQLRowwiseIteratorIf {
                      const DocDB& doc_db,
                      CoarseTimePoint deadline,
                      const ReadHybridTime& read_time,
-                     RWOperationCounter* pending_op_counter = nullptr)
+                     RWOperationCounter* pending_op_counter = nullptr,
+                     uint64_t trace_id = 0)
       : DocRowwiseIterator(
             *projection, doc_read_context, txn_op_context, doc_db, deadline,
-            read_time, pending_op_counter) {
+            read_time, pending_op_counter, trace_id) {
     projection_owner_ = std::move(projection);
   }
+
+  std::string LogPrefix() const;
 
   virtual ~DocRowwiseIterator();
 
@@ -230,6 +234,7 @@ class DocRowwiseIterator : public YQLRowwiseIteratorIf {
   mutable bool ignore_ttl_ = false;
 
   bool debug_dump_ = false;
+  uint64_t trace_id_ = 0;
 };
 
 }  // namespace docdb

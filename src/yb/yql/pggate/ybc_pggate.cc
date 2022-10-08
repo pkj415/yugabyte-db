@@ -157,6 +157,10 @@ void YBCInitPgGate(const YBCPgTypeEntity *data_type_table, int count, PgCallback
   YBCInitPgGateEx(data_type_table, count, pg_callbacks, nullptr);
 }
 
+uint64_t YBCGetPgClientSessionId() {
+  return pgapi->GetPgClientSessionId();
+}
+
 void YBCDestroyPgGate() {
   if (pgapi_shutdown_done.exchange(true)) {
     LOG(DFATAL) << __PRETTY_FUNCTION__ << " should only be called once";

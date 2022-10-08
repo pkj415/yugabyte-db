@@ -37,9 +37,13 @@ class WriteQuery {
              WriteQueryContext* context,
              Tablet* tablet,
              tserver::WriteResponsePB *response = nullptr,
-             docdb::OperationKind kind = docdb::OperationKind::kWrite);
+             docdb::OperationKind kind = docdb::OperationKind::kWrite,
+             uint64_t trace_id = 0);
 
   ~WriteQuery();
+
+  uint64_t TraceId() const;
+  std::string LogPrefix() const;
 
   WriteOperation& operation() {
     return *operation_;
@@ -203,6 +207,7 @@ class WriteQuery {
   // is managed by the rpc subsystem. These pointers maybe nullptr if the
   // operation was not initiated by an RPC call.
   const tserver::WriteRequestPB* client_request_ = nullptr;
+  uint64_t trace_id_ = 0;
   ReadHybridTime read_time_;
   bool allow_immediate_read_restart_ = false;
   std::unique_ptr<tserver::WriteRequestPB> client_request_holder_;

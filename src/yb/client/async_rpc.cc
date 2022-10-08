@@ -154,7 +154,8 @@ AsyncRpc::AsyncRpc(
                       mutable_retrier(),
                       trace_.get()),
       start_(CoarseMonoClock::Now()),
-      async_rpc_metrics_(data.batcher->async_rpc_metrics()) {
+      async_rpc_metrics_(data.batcher->async_rpc_metrics()),
+      trace_id_(data.trace_id) {
   mutable_retrier()->mutable_controller()->set_allow_local_calls_in_curr_thread(
       data.allow_local_calls_in_curr_thread);
 }
@@ -523,6 +524,8 @@ WriteRpc::WriteRpc(const AsyncRpcData& data)
     req_.set_request_id(request_pair.first);
     req_.set_min_running_request_id(request_pair.second);
   }
+  req_.set_trace_id(trace_id_);
+  LOG_WITH_PREFIX(INFO) << "Piyush - set trace_id in rpc " << trace_id_;
 }
 
 WriteRpc::~WriteRpc() {
@@ -670,6 +673,7 @@ ReadRpc::ReadRpc(const AsyncRpcData& data, YBConsistencyLevel yb_consistency_lev
       break;
   }
 
+  req_.set_trace_id(trace_id_);
   VLOG(3) << "Created batch for " << data.tablet->tablet_id() << ":\n"
           << req_.ShortDebugString();
 }

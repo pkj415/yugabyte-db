@@ -292,6 +292,7 @@ Result<PgClientSessionOperations> PrepareOperations(
       ops.push_back(write_op);
       session->Apply(std::move(write_op));
     }
+    session->SetTraceId(req.trace_id());
   }
   finished = true;
   return ops;
@@ -826,6 +827,7 @@ Status PgClientSession::BeginTransactionIfNecessary(
 
   txn = transaction_pool_provider_().Take(
       client::ForceGlobalTransaction(options.force_global_transaction()), deadline);
+  LOG_WITH_PREFIX(INFO) << "temporary_txn_id_= " << txn->GetTemporaryTxnId();
   if ((isolation == IsolationLevel::SNAPSHOT_ISOLATION ||
            isolation == IsolationLevel::READ_COMMITTED) &&
       txn_serial_no_ == options.txn_serial_no()) {

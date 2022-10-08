@@ -1280,6 +1280,7 @@ class TransactionParticipant::Impl
     OpId op_id = (**it).GetApplyOpId();
 
     if (running_requests_.empty() && op_id < checkpoint_op_id) {
+      // LOG(INFO) << "Piyush - cleaning transaction";
       (**it).ScheduleRemoveIntents(*it);
       RemoveTransaction(it, reason, min_running_notifier);
       VLOG_WITH_PREFIX(2) << "Cleaned transaction: " << txn_id << ", reason: " << reason
@@ -1289,6 +1290,7 @@ class TransactionParticipant::Impl
       return true;
     }
 
+    // LOG(INFO) << "Piyush - not cleaning transaction";
     // We cannot remove the transaction at this point, because there are running requests
     // that are reading the provisional DB and could request status of this transaction.
     // So we store transaction in a queue and wait when all requests that we launched before our

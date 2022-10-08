@@ -63,8 +63,9 @@ struct InFlightOpsGroup {
   bool need_metadata = false;
   const Iterator begin;
   const Iterator end;
+  const uint64_t trace_id_ = 0;
 
-  InFlightOpsGroup(const Iterator& group_begin, const Iterator& group_end);
+  InFlightOpsGroup(const Iterator& group_begin, const Iterator& group_end, uint64_t trace_id);
   std::string ToString() const;
 };
 
@@ -163,6 +164,8 @@ class Batcher : public Runnable, public std::enable_shared_from_this<Batcher> {
   // to when the Flush call is made (eg even if the lookup of the TS takes a long time, it
   // may time out before even sending an op). TODO: implement that
   void SetDeadline(CoarseTimePoint deadline);
+
+  void SetTraceId(uint64_t trace_id);
 
   // Add a new operation to the batch. Requires that the batch has not yet been flushed.
   // TODO: in other flush modes, this may not be the case -- need to
@@ -307,6 +310,7 @@ class Batcher : public Runnable, public std::enable_shared_from_this<Batcher> {
   // All buffered or in-flight ops.
   // Added to this set during apply, removed during Finished of AsyncRpc.
   std::vector<std::shared_ptr<YBOperation>> ops_;
+  uint64_t trace_id_;
   std::vector<InFlightOp> ops_queue_;
   InFlightOpsGroupsWithMetadata ops_info_;
 

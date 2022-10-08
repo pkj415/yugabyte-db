@@ -250,6 +250,7 @@ IntentAwareIterator::IntentAwareIterator(
 
   if (txn_op_context) {
     if (txn_op_context.txn_status_manager->MinRunningHybridTime() != HybridTime::kMax) {
+      // LOG(INFO) << "Piyush - start";
       intent_iter_ = docdb::CreateRocksDBIterator(doc_db.intents,
                                                   doc_db.key_bounds,
                                                   docdb::BloomFilterMode::DONT_USE_BLOOM_FILTER,
@@ -257,6 +258,7 @@ IntentAwareIterator::IntentAwareIterator(
                                                   rocksdb::kDefaultQueryId,
                                                   nullptr /* file_filter */,
                                                   &intent_upperbound_);
+      // LOG(INFO) << "Piyush - end";
     } else {
       VLOG(4) << "No transactions running";
     }

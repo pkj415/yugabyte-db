@@ -774,4 +774,6 @@ const char* RedactPasswordIfExists(const char* queryStr);
 #define Float4GetDatumFast(X) PointerGetDatum(&(X))
 #endif
 
+// char trace_uuid[36] = {0};
+
 #endif							/* POSTGRES_H */

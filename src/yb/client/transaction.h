@@ -38,6 +38,8 @@ class Trace;
 
 namespace client {
 
+YB_STRONGLY_TYPED_UUID_DECL(TemporaryTransactionId);
+
 using Waiter = boost::function<void(const Status&)>;
 using PrepareChildCallback = std::function<void(const Result<ChildTransactionDataPB>&)>;
 
@@ -154,6 +156,8 @@ class YBTransaction : public std::enable_shared_from_this<YBTransaction> {
   Status RollbackToSubTransaction(SubTransactionId id, CoarseTimePoint deadline);
 
   bool HasSubTransaction(SubTransactionId id);
+
+  TemporaryTransactionId GetTemporaryTxnId() const;
 
  private:
   class Impl;

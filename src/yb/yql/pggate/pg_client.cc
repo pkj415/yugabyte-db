@@ -349,6 +349,7 @@ class PgClient::Impl {
     auto& arena = operations->front()->arena();
     tserver::LWPgPerformRequestPB req(&arena);
     req.set_session_id(session_id_);
+    req.set_trace_id(5);
     *req.mutable_options() = std::move(*options);
     PrepareOperations(&req, operations);
 
@@ -526,6 +527,10 @@ class PgClient::Impl {
       return StatusFromPB(resp.status());
     }
     return resp;
+  }
+
+  uint64_t GetSessionId() const {
+    return session_id_;
   }
 
   #define YB_PG_CLIENT_SIMPLE_METHOD_IMPL(r, data, method) \
@@ -718,6 +723,10 @@ Result<bool> PgClient::CheckIfPitrActive() {
 
 Result<tserver::PgGetTserverCatalogVersionInfoResponsePB> PgClient::GetTserverCatalogVersionInfo() {
   return impl_->GetTserverCatalogVersionInfo();
+}
+
+uint64_t PgClient::GetSessionId() const {
+  return impl_->GetSessionId();
 }
 
 #define YB_PG_CLIENT_SIMPLE_METHOD_DEFINE(r, data, method) \

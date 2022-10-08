@@ -35,6 +35,7 @@
 #include "yb/util/countdown_latch.h"
 #include "yb/util/debug/trace_event.h"
 #include "yb/util/flag_tags.h"
+#include "yb/util/logging.h"
 #include "yb/util/metrics.h"
 #include "yb/util/scope_exit.h"
 #include "yb/util/trace.h"
@@ -101,6 +102,10 @@ class ReadQuery : public std::enable_shared_from_this<ReadQuery>, public rpc::Th
     if (metric_entity) {
       read_time_wait_ = METRIC_read_time_wait.Instantiate(metric_entity);
     }
+  }
+
+  std::string LogPrefix() const {
+    return Format("-$0- ", req_->has_trace_id() ? req_->trace_id() : 0);
   }
 
   void Perform() {
@@ -193,7 +198,7 @@ tablet::Tablet* ReadQuery::tablet() const {
 
 ReadHybridTime ReadQuery::FormRestartReadHybridTime(const HybridTime& restart_time) const {
   DCHECK_GT(restart_time, read_time_.read);
-  VLOG(1) << "Restart read required at: " << restart_time << ", original: " << read_time_;
+  VLOG_WITH_PREFIX(1) << "Restart read required at: " << restart_time << ", original: " << read_time_;
   auto result = read_time_;
   result.read = std::min(std::max(restart_time, safe_ht_to_read_), read_time_.global_limit);
   result.local_limit = std::min(safe_ht_to_read_, read_time_.global_limit);
@@ -228,7 +233,7 @@ Status ReadQuery::DoPerform() {
   ADOPT_TRACE(context_.trace());
   TRACE("Start Read");
   TRACE_EVENT1("tserver", "TabletServiceImpl::Read", "tablet_id", req_->tablet_id());
-  VLOG(2) << "Received Read RPC: " << req_->DebugString();
+  VLOG_WITH_PREFIX(2) << "Received Read RPC: " << req_->DebugString();
   // Unfortunately, determining the isolation level is not as straightforward as it seems. All but
   // the first request to a given tablet by a particular transaction assume that the tablet already
   // has the transaction metadata, including the isolation level, and those requests expect us to
@@ -251,16 +256,16 @@ Status ReadQuery::DoPerform() {
     serializable_isolation = isolation_level == IsolationLevel::SERIALIZABLE_ISOLATION;
 
     if (PREDICT_FALSE(FLAGS_TEST_transactional_read_delay_ms > 0)) {
-      LOG(INFO) << "Delaying transactional read for "
-                << FLAGS_TEST_transactional_read_delay_ms << " ms.";
+      LOG_WITH_PREFIX(INFO) << "Delaying transactional read for "
+                            << FLAGS_TEST_transactional_read_delay_ms << " ms.";
       SleepFor(MonoDelta::FromMilliseconds(FLAGS_TEST_transactional_read_delay_ms));
     }
 
 #if defined(DUMP_READ)
     if (req->pgsql_batch().size() > 0) {
-      LOG(INFO) << CHECK_RESULT(FullyDecodeTransactionId(req->transaction().transaction_id()))
-                << " READ: " << req->pgsql_batch(0).partition_column_values(0).value().int32_value()
-                << ", " << isolation_level;
+      LOG_WITH_PREFIX(INFO) << CHECK_RESULT(FullyDecodeTransactionId(req->transaction().transaction_id()))
+          << " READ: " << req->pgsql_batch(0).partition_column_values(0).value().int32_value()
+          << ", " << isolation_level;
     }
 #endif
   }
@@ -366,7 +371,7 @@ Status ReadQuery::DoPerform() {
   }
 
   if (FLAGS_TEST_simulate_time_out_failures_msecs > 0 && RandomUniformInt(0, 10) < 2) {
-    LOG(INFO) << "Marking request as timed out for test: " << req_->ShortDebugString();
+    LOG_WITH_PREFIX(INFO) << "Marking request as timed out for test: " << req_->ShortDebugString();
     SleepFor(MonoDelta::FromMilliseconds(FLAGS_TEST_simulate_time_out_failures_msecs));
     return STATUS(TimedOut, "timed out for test");
   }
@@ -407,7 +412,8 @@ Status ReadQuery::DoPerform() {
     auto query = std::make_unique<tablet::WriteQuery>(
         leader_peer.leader_term, deadline, leader_peer.peer.get(),
         leader_peer.peer->tablet(), nullptr /* response */,
-        docdb::OperationKind::kRead);
+        docdb::OperationKind::kRead,
+        req_->has_trace_id() ? req_->trace_id() : 0);
 
     auto& write = *query->operation().AllocateRequest();
     auto& write_batch = *write.mutable_write_batch();
@@ -427,7 +433,7 @@ Status ReadQuery::DoPerform() {
 
     RETURN_NOT_OK(leader_peer.peer->tablet()->CreateReadIntents(
         req_->transaction(), req_->subtransaction(), req_->ql_batch(), req_->pgsql_batch(),
-        &write_batch));
+        &write_batch, req_->trace_id()));
 
     query->AdjustYsqlQueryTransactionality(req_->pgsql_batch_size());
 
@@ -460,7 +466,7 @@ Status ReadQuery::DoPickReadTime(server::Clock* clock) {
       read_time_.global_limit = clock->MaxGlobalNow();
       read_time_.local_limit = std::min(safe_ht_to_read_, read_time_.global_limit);
 
-      VLOG(1) << "Read time: " << read_time_.ToString();
+      VLOG_WITH_PREFIX(1) << "Read time: " << read_time_.ToString();
     } else {
       read_time_.local_limit = read_time_.read;
       read_time_.global_limit = read_time_.read;
@@ -500,7 +506,7 @@ Status ReadQuery::Complete() {
   for (;;) {
     resp_->Clear();
     context_.ResetRpcSidecars();
-    VLOG(1) << "Read time: " << read_time_ << ", safe: " << safe_ht_to_read_;
+    VLOG_WITH_PREFIX(1) << "Read time: " << read_time_ << ", safe: " << safe_ht_to_read_;
     const auto result = VERIFY_RESULT(DoRead());
     if (allow_retry_ && read_time_ && read_time_ == result) {
       YB_LOG_EVERY_N_SECS(DFATAL, 5)
@@ -569,7 +575,7 @@ Status ReadQuery::Complete() {
       result = value_slice.ToDebugHexString();
     }
     auto key = read_context->req->pgsql_batch(0).partition_column_values(0).value().int32_value();
-    LOG(INFO) << txn_id << " READ DONE: " << key << " = " << result;
+    LOG_WITH_PREFIX(INFO) << txn_id << " READ DONE: " << key << " = " << result;
   }
 #endif
 
@@ -697,7 +703,8 @@ Result<ReadHybridTime> ReadQuery::DoReadImpl() {
       RETURN_NOT_OK(abstract_tablet_->HandlePgsqlReadRequest(
           context_.GetClientDeadline(), read_time,
           !allow_retry_ /* is_explicit_request_read_time */, pgsql_read_req, req_->transaction(),
-          req_->subtransaction(), &result, &num_rows_read));
+          req_->subtransaction(), &result, &num_rows_read,
+          req_->has_trace_id() ? req_->trace_id() : 0));
 
       total_num_rows_read += num_rows_read;
 

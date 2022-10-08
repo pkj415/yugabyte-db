@@ -98,6 +98,8 @@ DECLARE_bool(enable_wait_queue_based_pessimistic_locking);
 namespace yb {
 namespace client {
 
+YB_STRONGLY_TYPED_UUID_IMPL(TemporaryTransactionId);
+
 namespace {
 
 YB_STRONGLY_TYPED_BOOL(Child);
@@ -959,6 +961,10 @@ class YBTransaction::Impl final : public internal::TxnBatcherIf {
     return Status::OK();
   }
 
+  TemporaryTransactionId GetTemporaryTxnId() const {
+    return temporary_transaction_id_;
+  }
+
  private:
   void CompleteConstruction() {
     log_prefix_ = Format("$0$1: ", metadata_.transaction_id, child_ ? " (CHILD)" : "");
@@ -1596,6 +1602,8 @@ class YBTransaction::Impl final : public internal::TxnBatcherIf {
       auto decode_result = FullyDecodeTransactionId(request.state().transaction_id());
       if (decode_result.ok()) {
         metadata_.transaction_id = *decode_result;
+        // LOG(INFO) << "Got distributed transaction id " << metadata_.transaction_id
+        //           << " for temporary transaction id " << temporary_transaction_id_;
         auto id_str = AsString(metadata_.transaction_id);
         // It is not fully thread safe, since we don't use mutex to access log_prefix_.
         // But here we just replace characters inplace.
@@ -1956,6 +1964,7 @@ class YBTransaction::Impl final : public internal::TxnBatcherIf {
   rpc::Rpcs::Handle old_abort_handle_;
   rpc::Rpcs::Handle rollback_heartbeat_handle_;
   rpc::Rpcs::Handle old_rollback_heartbeat_handle_;
+  TemporaryTransactionId temporary_transaction_id_ = TemporaryTransactionId::GenerateRandom();
 
   // RPC handles for informing participant tablets about a move in transaction status location.
   std::unordered_map<TabletId, rpc::Rpcs::Handle>
@@ -2155,6 +2164,10 @@ Status YBTransaction::RollbackToSubTransaction(SubTransactionId id, CoarseTimePo
 
 bool YBTransaction::HasSubTransaction(SubTransactionId id) {
   return impl_->HasSubTransaction(id);
+}
+
+TemporaryTransactionId YBTransaction::GetTemporaryTxnId() const {
+  return impl_->GetTemporaryTxnId();
 }
 
 } // namespace client

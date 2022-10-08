@@ -90,19 +90,20 @@ Status AbstractTablet::ProcessPgsqlReadRequest(CoarseTimePoint deadline,
                                                const std::shared_ptr<TableInfo>& table_info,
                                                const TransactionOperationContext& txn_op_context,
                                                PgsqlReadRequestResult* result,
-                                               size_t* num_rows_read) {
-  docdb::PgsqlReadOperation doc_op(pgsql_read_request, txn_op_context);
+                                               size_t* num_rows_read,
+                                               uint64_t trace_id) {
+  docdb::PgsqlReadOperation doc_op(pgsql_read_request, txn_op_context, trace_id);
 
   // Form a schema of columns that are referenced by this query.
   const auto doc_read_context = rpc::SharedField(table_info, table_info->doc_read_context.get());
   const auto index_doc_read_context = pgsql_read_request.has_index_request()
       ? GetDocReadContext(pgsql_read_request.index_request().table_id()) : nullptr;
 
-  TRACE("Start Execute");
+  TRACE("-$0- Start Execute", trace_id);
   auto fetched_rows = doc_op.Execute(
       QLStorage(), deadline, read_time, is_explicit_request_read_time, *doc_read_context,
       index_doc_read_context.get(), &result->rows_data, &result->restart_read_ht);
-  TRACE("Done Execute");
+  TRACE("-$0- Done Execute", trace_id);
   if (!fetched_rows.ok()) {
     result->response.set_status(PgsqlResponsePB::PGSQL_STATUS_RUNTIME_ERROR);
     const auto& s = fetched_rows.status();
@@ -125,7 +126,7 @@ Status AbstractTablet::ProcessPgsqlReadRequest(CoarseTimePoint deadline,
 
   // Serializing data for PgGate API.
   CHECK(!pgsql_read_request.has_rsrow_desc()) << "Row description is not needed";
-  TRACE("Done Handle");
+  TRACE("-$0- Done Handle", trace_id);
 
   return Status::OK();
 }

@@ -603,6 +603,7 @@ class PgApiImpl {
   Status ValidatePlacement(const char *placement_info);
 
   Result<bool> CheckIfPitrActive();
+  uint64_t GetPgClientSessionId() const;
 
   MemTracker &GetMemTracker() { return *mem_tracker_; }
 

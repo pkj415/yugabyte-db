@@ -284,6 +284,10 @@ bool Batcher::Has(const std::shared_ptr<YBOperation>& yb_op) const {
   return false;
 }
 
+void Batcher::SetTraceId(uint64_t trace_id) {
+  trace_id_ = trace_id;
+}
+
 void Batcher::Add(std::shared_ptr<YBOperation> op) {
   if (state_ != BatcherState::kGatheringOps) {
     LOG_WITH_PREFIX(DFATAL)
@@ -461,13 +465,13 @@ void Batcher::AllLookupsDone() {
       return;
     }
     if (current_tablet != it_tablet || current_group != it_group) {
-      ops_info_.groups.emplace_back(group_start, it);
+      ops_info_.groups.emplace_back(group_start, it, trace_id_);
       group_start = it;
       current_group = it_group;
       current_tablet = it_tablet;
     }
   }
-  ops_info_.groups.emplace_back(group_start, ops_queue_.end());
+  ops_info_.groups.emplace_back(group_start, ops_queue_.end(), trace_id_);
 
   ExecuteOperations(Initial::kTrue);
 }
@@ -586,7 +590,8 @@ std::shared_ptr<AsyncRpc> Batcher::CreateRpc(
     .allow_local_calls_in_curr_thread = allow_local_calls_in_curr_thread,
     .need_consistent_read = need_consistent_read,
     .ops = InFlightOps(group.begin, group.end),
-    .need_metadata = group.need_metadata
+    .need_metadata = group.need_metadata,
+    .trace_id = trace_id_
   };
 
   switch (op_group) {
@@ -704,17 +709,20 @@ CollectedErrors Batcher::GetAndClearPendingErrors() {
 std::string Batcher::LogPrefix() const {
   const void* self = this;
   return Format(
-      "Batcher ($0), session ($1): ", self, static_cast<void*>(weak_session_.lock().get()));
+      "-$2- Batcher ($0), session ($1): ", self, static_cast<void*>(weak_session_.lock().get()),
+      trace_id_);
 }
 
-InFlightOpsGroup::InFlightOpsGroup(const Iterator& group_begin, const Iterator& group_end)
-    : begin(group_begin), end(group_end) {
+InFlightOpsGroup::InFlightOpsGroup(
+    const Iterator& group_begin, const Iterator& group_end, uint64_t trace_id)
+    : begin(group_begin), end(group_end), trace_id_(trace_id) {
 }
 
 std::string InFlightOpsGroup::ToString() const {
-  return Format("{items: $0 need_metadata: $1}",
+  return Format("{items: $0 need_metadata: $1 trace_id: $2}",
                 AsString(boost::make_iterator_range(begin, end)),
-                need_metadata);
+                need_metadata,
+                trace_id_);
 }
 
 }  // namespace internal

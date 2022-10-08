@@ -1868,7 +1868,8 @@ void TabletServiceImpl::Write(const WriteRequestPB* req,
 
   auto query = std::make_unique<tablet::WriteQuery>(
       tablet.leader_term, context.GetClientDeadline(), tablet.peer.get(),
-      tablet.peer->tablet(), resp);
+      tablet.peer->tablet(), resp, docdb::OperationKind::kWrite,
+      req->has_trace_id() ? req->trace_id() : 0);
   query->set_client_request(*req);
 
   auto context_ptr = std::make_shared<RpcContext>(std::move(context));

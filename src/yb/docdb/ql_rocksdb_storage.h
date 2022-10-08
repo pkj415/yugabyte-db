@@ -57,7 +57,8 @@ class QLRocksDBStorage : public YQLStorageIf {
       const TransactionOperationContext& txn_op_context,
       CoarseTimePoint deadline,
       const ReadHybridTime& read_time,
-      YQLRowwiseIteratorIf::UniPtr* iter) const override;
+      YQLRowwiseIteratorIf::UniPtr* iter,
+      uint64_t trace_id) const override;
 
   Status InitIterator(YQLRowwiseIteratorIf* doc_iter,
                               const PgsqlReadRequestPB& request,
@@ -72,7 +73,8 @@ class QLRocksDBStorage : public YQLStorageIf {
       CoarseTimePoint deadline,
       const ReadHybridTime& read_time,
       const DocKey& start_doc_key,
-      YQLRowwiseIteratorIf::UniPtr* iter) const override;
+      YQLRowwiseIteratorIf::UniPtr* iter,
+      uint64_t trace_id) const override;
 
   Status GetIterator(
       uint64 stmt_id,
@@ -82,7 +84,8 @@ class QLRocksDBStorage : public YQLStorageIf {
       CoarseTimePoint deadline,
       const ReadHybridTime& read_time,
       const QLValuePB& ybctid,
-      YQLRowwiseIteratorIf::UniPtr* iter) const override;
+      YQLRowwiseIteratorIf::UniPtr* iter,
+      uint64_t trace_id) const override;
 
  private:
   const DocDB doc_db_;

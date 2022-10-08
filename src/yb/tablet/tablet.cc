@@ -1535,7 +1535,8 @@ Status Tablet::HandlePgsqlReadRequest(
     const TransactionMetadataPB& transaction_metadata,
     const SubTransactionMetadataPB& subtransaction_metadata,
     PgsqlReadRequestResult* result,
-    size_t* num_rows_read) {
+    size_t* num_rows_read,
+    uint64_t trace_id) {
   TRACE(LogPrefix());
   auto scoped_read_operation = CreateNonAbortableScopedRWOperation(deadline);
   RETURN_NOT_OK(scoped_read_operation);
@@ -1549,10 +1550,11 @@ Status Tablet::HandlePgsqlReadRequest(
           transaction_metadata,
           table_info->schema().table_properties().is_ysql_catalog_table(),
           &subtransaction_metadata);
+          // add trace_id
   RETURN_NOT_OK(txn_op_ctx);
   auto status = ProcessPgsqlReadRequest(
       deadline, read_time, is_explicit_request_read_time,
-      pgsql_read_request, table_info, *txn_op_ctx, result, num_rows_read);
+      pgsql_read_request, table_info, *txn_op_ctx, result, num_rows_read, trace_id);
 
   // Assert the table is a Postgres table.
   DCHECK_EQ(table_info->table_type, TableType::PGSQL_TABLE_TYPE);
@@ -3452,7 +3454,8 @@ Status Tablet::CreateReadIntents(
     const SubTransactionMetadataPB& subtransaction_metadata,
     const google::protobuf::RepeatedPtrField<QLReadRequestPB>& ql_batch,
     const google::protobuf::RepeatedPtrField<PgsqlReadRequestPB>& pgsql_batch,
-    docdb::KeyValueWriteBatchPB* write_batch) {
+    docdb::KeyValueWriteBatchPB* write_batch,
+    uint64_t trace_id) {
   auto txn_op_ctx = VERIFY_RESULT(CreateTransactionOperationContext(
       transaction_metadata,
       /* is_ysql_catalog_table */ pgsql_batch.size() > 0 && is_sys_catalog_,
@@ -3468,7 +3471,7 @@ Status Tablet::CreateReadIntents(
     if (table_info == nullptr || table_info->table_id != pgsql_read.table_id()) {
       table_info = VERIFY_RESULT(metadata_->GetTableInfo(pgsql_read.table_id()));
     }
-    docdb::PgsqlReadOperation doc_op(pgsql_read, txn_op_ctx);
+    docdb::PgsqlReadOperation doc_op(pgsql_read, txn_op_ctx, trace_id);
     RETURN_NOT_OK(doc_op.GetIntents(table_info->schema(), write_batch));
   }
 

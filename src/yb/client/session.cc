@@ -298,6 +298,10 @@ internal::Batcher& YBSession::Batcher() {
   return *batcher_;
 }
 
+void YBSession::SetTraceId(uint64_t trace_id) {
+  Batcher().SetTraceId(trace_id);
+}
+
 void YBSession::Apply(YBOperationPtr yb_op) {
   Batcher().Add(yb_op);
 }

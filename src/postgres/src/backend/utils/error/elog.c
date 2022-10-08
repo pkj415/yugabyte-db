@@ -2771,6 +2771,13 @@ log_line_prefix(StringInfo buf, ErrorData *edata)
 				}
 				break;
 			}
+			// case 'z': {
+			// 	if (padding != 0)
+			// 		appendStringInfo(buf, "%*s", padding, trace_uuid);
+			// 	else
+			// 		appendStringInfoString(buf, trace_uuid);
+			// 	break;
+			// }
 			default:
 				/* format error - ignore it */
 				break;

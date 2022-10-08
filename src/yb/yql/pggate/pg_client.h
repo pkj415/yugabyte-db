@@ -125,6 +125,7 @@ class PgClient {
   Status DeleteSequenceTuple(int64_t db_oid, int64_t seq_oid);
 
   Status DeleteDBSequences(int64_t db_oid);
+  uint64_t GetSessionId() const;
 
   void PerformAsync(
       tserver::PgPerformOptionsPB* options,

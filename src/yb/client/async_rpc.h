@@ -23,6 +23,7 @@
 #include "yb/common/common_types.pb.h"
 #include "yb/common/read_hybrid_time.h"
 
+#include "yb/gutil/integral_types.h"
 #include "yb/rpc/rpc_fwd.h"
 
 #include "yb/tserver/tserver.pb.h"
@@ -64,6 +65,7 @@ struct AsyncRpcData {
   bool need_consistent_read = false;
   InFlightOps ops;
   bool need_metadata = false;
+  uint64_t trace_id = 0;
 };
 
 struct FlushExtraResult {
@@ -94,6 +96,9 @@ class AsyncRpc : public rpc::Rpc, public TabletRpc {
   std::shared_ptr<const YBTable> table() const;
   const RemoteTablet& tablet() const { return *tablet_invoker_.tablet(); }
   const InFlightOps& ops() const { return ops_; }
+  std::string LogPrefix() const {
+    return Format("-$0- ", trace_id_);
+  }
 
  protected:
   void Finished(const Status& status) override;
@@ -129,6 +134,7 @@ class AsyncRpc : public rpc::Rpc, public TabletRpc {
   CoarseTimePoint start_;
   std::shared_ptr<AsyncRpcMetrics> async_rpc_metrics_;
   rpc::RpcCommandPtr retained_self_;
+  uint64_t trace_id_ = 0;
 };
 
 template <class Req, class Resp>

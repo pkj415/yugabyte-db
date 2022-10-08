@@ -68,11 +68,17 @@ namespace docdb {
 
 class ScanChoices {
  public:
-  explicit ScanChoices(bool is_forward_scan) : is_forward_scan_(is_forward_scan) {}
+  explicit ScanChoices(bool is_forward_scan, uint64_t trace_id)
+    : is_forward_scan_(is_forward_scan),
+      trace_id_(trace_id) {}
   virtual ~ScanChoices() {}
 
+  std::string LogPrefix() const {
+    return Format("-$0- ", trace_id_);
+  }
+
   bool CurrentTargetMatchesKey(const Slice& curr) {
-    VLOG(3) << __PRETTY_FUNCTION__ << " checking if acceptable ? "
+    VLOG_WITH_PREFIX(3) << __PRETTY_FUNCTION__ << " checking if acceptable ? "
             << (curr == current_scan_target_ ? "YEP" : "NOPE")
             << ": " << DocKey::DebugSliceToString(curr)
             << " vs " << DocKey::DebugSliceToString(current_scan_target_.AsSlice());
@@ -114,13 +120,14 @@ class ScanChoices {
   const bool is_forward_scan_;
   KeyBytes current_scan_target_;
   bool finished_ = false;
+  uint64_t trace_id_ = 0;
 };
 
 class DiscreteScanChoices : public ScanChoices {
  public:
   DiscreteScanChoices(const DocQLScanSpec& doc_spec, const KeyBytes& lower_doc_key,
-                      const KeyBytes& upper_doc_key)
-      : ScanChoices(doc_spec.is_forward_scan()) {
+                      const KeyBytes& upper_doc_key, uint64_t trace_id)
+      : ScanChoices(doc_spec.is_forward_scan(), trace_id) {
     range_cols_scan_options_ = std::make_shared<std::vector<OptionList>>();
     auto& options = doc_spec.range_options();
     auto& num_cols = doc_spec.range_options_num_cols();
@@ -151,8 +158,8 @@ class DiscreteScanChoices : public ScanChoices {
   }
 
   DiscreteScanChoices(const DocPgsqlScanSpec& doc_spec, const KeyBytes& lower_doc_key,
-                      const KeyBytes& upper_doc_key)
-      : ScanChoices(doc_spec.is_forward_scan()) {
+                      const KeyBytes& upper_doc_key, uint64_t trace_id)
+      : ScanChoices(doc_spec.is_forward_scan(), trace_id) {
     range_cols_scan_options_ = doc_spec.range_options();
     range_options_num_cols_ = doc_spec.range_options_num_cols();
     current_scan_target_idxs_.resize(range_cols_scan_options_->size());
@@ -265,7 +272,7 @@ Result<bool> DiscreteScanChoices::InitScanTargetRangeGroupIfNeeded() {
 }
 
 Status DiscreteScanChoices::DoneWithCurrentTarget() {
-  VLOG(2) << __PRETTY_FUNCTION__ << " moving on to next target";
+  VLOG_WITH_PREFIX(2) << __PRETTY_FUNCTION__ << " moving on to next target";
   DCHECK(!FinishedWithScanChoices());
 
   // Initialize the first target/option if not done already, otherwise go to the next one.
@@ -277,7 +284,7 @@ Status DiscreteScanChoices::DoneWithCurrentTarget() {
 }
 
 Status DiscreteScanChoices::SkipTargetsUpTo(const Slice& new_target) {
-  VLOG(2) << __PRETTY_FUNCTION__
+  VLOG_WITH_PREFIX(2) << __PRETTY_FUNCTION__
             << " Updating current target to be >= "
             << DocKey::DebugSliceToString(new_target);
   DCHECK(!FinishedWithScanChoices());
@@ -337,23 +344,23 @@ Status DiscreteScanChoices::SkipTargetsUpTo(const Slice& new_target) {
 
   current_scan_target_.AppendKeyEntryType(KeyEntryType::kGroupEnd);
 
-  VLOG(2) << "After " << __PRETTY_FUNCTION__ << " current_scan_target_ is "
+  VLOG_WITH_PREFIX(2) << "After " << __PRETTY_FUNCTION__ << " current_scan_target_ is "
           << DocKey::DebugSliceToString(current_scan_target_);
 
   return Status::OK();
 }
 
 Status DiscreteScanChoices::SeekToCurrentTarget(IntentAwareIterator* db_iter) {
-  VLOG(2) << __PRETTY_FUNCTION__ << " Advancing iterator towards target";
+  VLOG_WITH_PREFIX(2) << __PRETTY_FUNCTION__ << " Advancing iterator towards target";
   // Seek to the current target doc key if needed.
   if (!FinishedWithScanChoices()) {
     if (is_forward_scan_) {
-      VLOG(2) << __PRETTY_FUNCTION__ << " Seeking to " << current_scan_target_;
+      VLOG_WITH_PREFIX(2) << __PRETTY_FUNCTION__ << " Seeking to " << current_scan_target_;
       db_iter->Seek(current_scan_target_);
     } else {
       auto tmp = current_scan_target_;
       tmp.AppendKeyEntryType(KeyEntryType::kHighest);
-      VLOG(2) << __PRETTY_FUNCTION__ << " Going to PrevDocKey " << tmp;
+      VLOG_WITH_PREFIX(2) << __PRETTY_FUNCTION__ << " Going to PrevDocKey " << tmp;
       db_iter->PrevDocKey(tmp);
     }
   }
@@ -423,8 +430,9 @@ class HybridScanChoices : public ScanChoices {
                     const std::shared_ptr<std::vector<OptionList>>& range_options,
                     const std::vector<ColumnId>& range_bounds_col_ids,
                     const QLScanRange* range_bounds,
-                    const std::vector<size_t>& range_options_num_cols)
-      : ScanChoices(is_forward_scan), lower_doc_key_(lower_doc_key), upper_doc_key_(upper_doc_key) {
+                    const std::vector<size_t>& range_options_num_cols,
+                    uint64_t trace_id)
+      : ScanChoices(is_forward_scan, trace_id), lower_doc_key_(lower_doc_key), upper_doc_key_(upper_doc_key) {
     size_t num_hash_cols = schema.num_hash_key_columns();
 
     for (size_t idx = num_hash_cols; idx < schema.num_key_columns(); idx++) {
@@ -503,22 +511,26 @@ class HybridScanChoices : public ScanChoices {
   HybridScanChoices(const Schema& schema,
                     const DocPgsqlScanSpec& doc_spec,
                     const KeyBytes& lower_doc_key,
-                    const KeyBytes& upper_doc_key)
+                    const KeyBytes& upper_doc_key,
+                    uint64_t trace_id)
       : HybridScanChoices(
             schema, lower_doc_key, upper_doc_key, doc_spec.is_forward_scan(),
             doc_spec.range_options_indexes(), doc_spec.range_options(),
             doc_spec.range_bounds_indexes(), doc_spec.range_bounds(),
-            doc_spec.range_options_num_cols()) {}
+            doc_spec.range_options_num_cols(),
+            trace_id) {}
 
   HybridScanChoices(const Schema& schema,
                     const DocQLScanSpec& doc_spec,
                     const KeyBytes& lower_doc_key,
-                    const KeyBytes& upper_doc_key)
+                    const KeyBytes& upper_doc_key,
+                    uint64_t trace_id)
       : HybridScanChoices(
             schema, lower_doc_key, upper_doc_key, doc_spec.is_forward_scan(),
             doc_spec.range_options_indexes(), doc_spec.range_options(),
             doc_spec.range_bounds_indexes(), doc_spec.range_bounds(),
-            doc_spec.range_options_num_cols()) {}
+            doc_spec.range_options_num_cols(),
+            trace_id) {}
 
   Status SkipTargetsUpTo(const Slice& new_target) override;
   Status DoneWithCurrentTarget() override;
@@ -557,7 +569,7 @@ class HybridScanChoices : public ScanChoices {
 // Sets current_scan_target_ to the first tuple in the filter space
 // that is >= new_target.
 Status HybridScanChoices::SkipTargetsUpTo(const Slice& new_target) {
-  VLOG(2) << __PRETTY_FUNCTION__ << " Updating current target to be >= "
+  VLOG_WITH_PREFIX(2) << __PRETTY_FUNCTION__ << " Updating current target to be >= "
           << DocKey::DebugSliceToString(new_target);
   DCHECK(!FinishedWithScanChoices());
   is_options_done_ = false;
@@ -786,7 +798,7 @@ Status HybridScanChoices::SkipTargetsUpTo(const Slice& new_target) {
   }
 
   current_scan_target_.AppendKeyEntryType(KeyEntryType::kGroupEnd);
-  VLOG(2) << "After " << __PRETTY_FUNCTION__ << " current_scan_target_ is "
+  VLOG_WITH_PREFIX(2) << "After " << __PRETTY_FUNCTION__ << " current_scan_target_ is "
           << DocKey::DebugSliceToString(current_scan_target_);
   return Status::OK();
 }
@@ -821,7 +833,7 @@ Status HybridScanChoices::SkipTargetsUpTo(const Slice& new_target) {
 // scan direction is also the next tuple in the filter space and start_col
 // is given as the last column
 Status HybridScanChoices::IncrementScanTargetAtOptionList(int start_option_list_idx) {
-  VLOG_WITH_FUNC(2) << "Incrementing at " << start_option_list_idx;
+  VLOG_WITH_PREFIX_AND_FUNC(2) << "Incrementing at " << start_option_list_idx;
 
   // Increment start col, move backwards in case of overflow.
   int option_list_idx = start_option_list_idx;
@@ -949,9 +961,9 @@ Status HybridScanChoices::DoneWithCurrentTarget() {
   // if this is a forward scan it doesn't matter what we do
   // if this is a backwards scan then dont clear current_scan_target and we
   // stay live
-  VLOG_WITH_FUNC(2)
+  VLOG_WITH_PREFIX_AND_FUNC(2)
       << "Current_scan_target_ is " << DocKey::DebugSliceToString(current_scan_target_);
-  VLOG_WITH_FUNC(2) << "Moving on to next target";
+  VLOG_WITH_PREFIX_AND_FUNC(2) << "Moving on to next target";
 
   DCHECK(!FinishedWithScanChoices());
 
@@ -965,11 +977,11 @@ Status HybridScanChoices::DoneWithCurrentTarget() {
     finished_ = bound_key.empty() ? false
                   : is_forward_scan_
                       == (current_scan_target_.CompareTo(bound_key) >= 0);
-    VLOG(4) << "finished_ = " << finished_;
+    VLOG_WITH_PREFIX(4) << "finished_ = " << finished_;
   }
 
 
-  VLOG_WITH_FUNC(4)
+  VLOG_WITH_PREFIX_AND_FUNC(4)
       << "current_scan_target_ is " << DocKey::DebugSliceToString(current_scan_target_)
       << " and prev_scan_target_ is " << DocKey::DebugSliceToString(prev_scan_target_);
 
@@ -995,17 +1007,17 @@ Status HybridScanChoices::DoneWithCurrentTarget() {
 // current_scan_target_ and prev_scan_target_ (relevant in backwards
 // scans)
 Status HybridScanChoices::SeekToCurrentTarget(IntentAwareIterator* db_iter) {
-  VLOG(2) << __func__ << ", pos: " << db_iter->DebugPosToString();
+  VLOG_WITH_PREFIX(2) << __func__ << ", pos: " << db_iter->DebugPosToString();
 
   if (!FinishedWithScanChoices()) {
     // if current_scan_target_ is valid we use it to determine
     // what to seek to
     if (!current_scan_target_.empty()) {
-      VLOG(3) << __PRETTY_FUNCTION__
+      VLOG_WITH_PREFIX(3) << __PRETTY_FUNCTION__
               << " current_scan_target_ is non-empty. "
               << DocKey::DebugSliceToString(current_scan_target_);
       if (is_forward_scan_) {
-        VLOG(3) << __PRETTY_FUNCTION__
+        VLOG_WITH_PREFIX(3) << __PRETTY_FUNCTION__
                 << " Seeking to "
                 << DocKey::DebugSliceToString(current_scan_target_);
         db_iter->Seek(current_scan_target_);
@@ -1016,7 +1028,7 @@ Status HybridScanChoices::SeekToCurrentTarget(IntentAwareIterator* db_iter) {
         // current_scan_target_
         auto tmp = current_scan_target_;
         KeyEntryValue(KeyEntryType::kHighest).AppendToKey(&tmp);
-        VLOG(3) << __PRETTY_FUNCTION__ << " Going to PrevDocKey " << tmp;
+        VLOG_WITH_PREFIX(3) << __PRETTY_FUNCTION__ << " Going to PrevDocKey " << tmp;
         db_iter->PrevDocKey(tmp);
       }
     } else {
@@ -1031,8 +1043,8 @@ Status HybridScanChoices::SeekToCurrentTarget(IntentAwareIterator* db_iter) {
 
 class RangeBasedScanChoices : public ScanChoices {
  public:
-  RangeBasedScanChoices(const Schema& schema, const DocQLScanSpec& doc_spec)
-      : ScanChoices(doc_spec.is_forward_scan()) {
+  RangeBasedScanChoices(const Schema& schema, const DocQLScanSpec& doc_spec, uint64_t trace_id)
+      : ScanChoices(doc_spec.is_forward_scan(), trace_id) {
     DCHECK(doc_spec.range_bounds());
     lower_.reserve(schema.num_range_key_columns());
     upper_.reserve(schema.num_range_key_columns());
@@ -1047,8 +1059,8 @@ class RangeBasedScanChoices : public ScanChoices {
     }
   }
 
-  RangeBasedScanChoices(const Schema& schema, const DocPgsqlScanSpec& doc_spec)
-      : ScanChoices(doc_spec.is_forward_scan()) {
+  RangeBasedScanChoices(const Schema& schema, const DocPgsqlScanSpec& doc_spec, uint64_t trace_id)
+      : ScanChoices(doc_spec.is_forward_scan(), trace_id) {
     DCHECK(doc_spec.range_bounds());
     lower_.reserve(schema.num_range_key_columns());
     upper_.reserve(schema.num_range_key_columns());
@@ -1073,7 +1085,7 @@ class RangeBasedScanChoices : public ScanChoices {
 };
 
 Status RangeBasedScanChoices::SkipTargetsUpTo(const Slice& new_target) {
-  VLOG(2) << __PRETTY_FUNCTION__ << " Updating current target to be >= "
+  VLOG_WITH_PREFIX(2) << __PRETTY_FUNCTION__ << " Updating current target to be >= "
           << DocKey::DebugSliceToString(new_target);
   DCHECK(!FinishedWithScanChoices());
 
@@ -1103,7 +1115,7 @@ Status RangeBasedScanChoices::SkipTargetsUpTo(const Slice& new_target) {
   bool last_was_infinity = false;
   for (col_idx = 0; VERIFY_RESULT(decoder.HasPrimitiveValue()); col_idx++) {
     RETURN_NOT_OK(decoder.DecodeKeyEntryValue(&target_value));
-    VLOG(3) << "col_idx " << col_idx << " is " << target_value << " in ["
+    VLOG_WITH_PREFIX(3) << "col_idx " << col_idx << " is " << target_value << " in ["
             << yb::ToString(lower_[col_idx]) << " , " << yb::ToString(upper_[col_idx]) << " ] ?";
 
     const auto& lower = lower_[col_idx];
@@ -1111,13 +1123,13 @@ Status RangeBasedScanChoices::SkipTargetsUpTo(const Slice& new_target) {
       const auto tgt = (is_forward_scan_ ? lower : KeyEntryValue(KeyEntryType::kLowest));
       tgt.AppendToKey(&current_scan_target_);
       last_was_infinity = tgt.IsInfinity();
-      VLOG(3) << " Updating idx " << col_idx << " from " << target_value << " to " << tgt;
+      VLOG_WITH_PREFIX(3) << " Updating idx " << col_idx << " from " << target_value << " to " << tgt;
       break;
     }
     const auto& upper = upper_[col_idx];
     if (target_value > upper) {
       const auto tgt = (!is_forward_scan_ ? upper : KeyEntryValue(KeyEntryType::kHighest));
-      VLOG(3) << " Updating idx " << col_idx << " from " << target_value << " to " << tgt;
+      VLOG_WITH_PREFIX(3) << " Updating idx " << col_idx << " from " << target_value << " to " << tgt;
       tgt.AppendToKey(&current_scan_target_);
       last_was_infinity = tgt.IsInfinity();
       break;
@@ -1134,17 +1146,17 @@ Status RangeBasedScanChoices::SkipTargetsUpTo(const Slice& new_target) {
       break;
     }
     if (is_forward_scan_) {
-      VLOG(3) << " Updating col_idx " << col_idx << " to " << lower_[col_idx];
+      VLOG_WITH_PREFIX(3) << " Updating col_idx " << col_idx << " to " << lower_[col_idx];
       lower_[col_idx].AppendToKey(&current_scan_target_);
       last_was_infinity = lower_[col_idx].IsInfinity();
     } else {
-      VLOG(3) << " Updating col_idx " << col_idx << " to " << upper_[col_idx];
+      VLOG_WITH_PREFIX(3) << " Updating col_idx " << col_idx << " to " << upper_[col_idx];
       upper_[col_idx].AppendToKey(&current_scan_target_);
       last_was_infinity = upper_[col_idx].IsInfinity();
     }
   }
   current_scan_target_.AppendKeyEntryType(KeyEntryType::kGroupEnd);
-  VLOG(2) << "After " << __PRETTY_FUNCTION__ << " current_scan_target_ is "
+  VLOG_WITH_PREFIX(2) << "After " << __PRETTY_FUNCTION__ << " current_scan_target_ is "
           << DocKey::DebugSliceToString(current_scan_target_);
 
   return Status::OK();
@@ -1157,22 +1169,22 @@ Status RangeBasedScanChoices::DoneWithCurrentTarget() {
 }
 
 Status RangeBasedScanChoices::SeekToCurrentTarget(IntentAwareIterator* db_iter) {
-  VLOG(2) << __PRETTY_FUNCTION__ << " Advancing iterator towards target";
+  VLOG_WITH_PREFIX(2) << __PRETTY_FUNCTION__ << " Advancing iterator towards target";
 
   if (!FinishedWithScanChoices()) {
     if (!current_scan_target_.empty()) {
-      VLOG(3) << __PRETTY_FUNCTION__
+      VLOG_WITH_PREFIX(3) << __PRETTY_FUNCTION__
               << " current_scan_target_ is non-empty. "
               << current_scan_target_;
       if (is_forward_scan_) {
-        VLOG(3) << __PRETTY_FUNCTION__
+        VLOG_WITH_PREFIX(3) << __PRETTY_FUNCTION__
                 << " Seeking to "
                 << DocKey::DebugSliceToString(current_scan_target_);
         db_iter->Seek(current_scan_target_);
       } else {
         auto tmp = current_scan_target_;
         KeyEntryValue(KeyEntryType::kHighest).AppendToKey(&tmp);
-        VLOG(3) << __PRETTY_FUNCTION__ << " Going to PrevDocKey " << tmp;  // Never seen.
+        VLOG_WITH_PREFIX(3) << __PRETTY_FUNCTION__ << " Going to PrevDocKey " << tmp;  // Never seen.
         db_iter->PrevDocKey(tmp);
       }
     } else {
@@ -1192,7 +1204,8 @@ DocRowwiseIterator::DocRowwiseIterator(
     const DocDB& doc_db,
     CoarseTimePoint deadline,
     const ReadHybridTime& read_time,
-    RWOperationCounter* pending_op_counter)
+    RWOperationCounter* pending_op_counter,
+    uint64_t trace_id)
     : projection_(projection),
       doc_read_context_(doc_read_context),
       txn_op_context_(txn_op_context),
@@ -1201,13 +1214,18 @@ DocRowwiseIterator::DocRowwiseIterator(
       doc_db_(doc_db),
       has_bound_key_(false),
       pending_op_(pending_op_counter),
-      done_(false) {
+      done_(false),
+      trace_id_(trace_id) {
   projection_subkeys_.reserve(projection.num_columns() + 1);
   projection_subkeys_.push_back(KeyEntryValue::kLivenessColumn);
   for (size_t i = projection_.num_key_columns(); i < projection.num_columns(); i++) {
     projection_subkeys_.push_back(KeyEntryValue::MakeColumnId(projection.column_id(i)));
   }
   std::sort(projection_subkeys_.begin(), projection_subkeys_.end());
+}
+
+std::string DocRowwiseIterator::LogPrefix() const {
+  return Format("-$0- ", trace_id_);
 }
 
 DocRowwiseIterator::~DocRowwiseIterator() {
@@ -1229,7 +1247,7 @@ Status DocRowwiseIterator::Init(TableType table_type, const Slice& sub_doc_key) 
     row_key_ = iter_key_;
   }
   row_hash_key_ = row_key_;
-  VLOG(3) << __PRETTY_FUNCTION__ << " Seeking to " << row_key_;
+  VLOG_WITH_PREFIX(3) << __PRETTY_FUNCTION__ << " Seeking to " << row_key_;
   db_iter_->Seek(row_key_);
   row_ready_ = false;
   has_bound_key_ = false;
@@ -1247,21 +1265,21 @@ Result<bool> DocRowwiseIterator::InitScanChoices(
   if (!FLAGS_disable_hybrid_scan) {
     if (doc_spec.range_options() || doc_spec.range_bounds()) {
       scan_choices_.reset(new HybridScanChoices(
-          doc_read_context_.schema, doc_spec, lower_doc_key, upper_doc_key));
+          doc_read_context_.schema, doc_spec, lower_doc_key, upper_doc_key, trace_id_));
     }
 
     return false;
   }
 
   if (doc_spec.range_options()) {
-    scan_choices_.reset(new DiscreteScanChoices(doc_spec, lower_doc_key, upper_doc_key));
+    scan_choices_.reset(new DiscreteScanChoices(doc_spec, lower_doc_key, upper_doc_key, trace_id_));
     // Let's not seek to the lower doc key or upper doc key. We know exactly what we want.
     RETURN_NOT_OK(AdvanceIteratorToNextDesiredRow());
     return true;
   }
 
   if (doc_spec.range_bounds()) {
-    scan_choices_.reset(new RangeBasedScanChoices(doc_read_context_.schema, doc_spec));
+    scan_choices_.reset(new RangeBasedScanChoices(doc_read_context_.schema, doc_spec, trace_id_));
   }
 
   return false;
@@ -1274,21 +1292,21 @@ Result<bool> DocRowwiseIterator::InitScanChoices(
   if (!FLAGS_disable_hybrid_scan) {
     if (doc_spec.range_options() || doc_spec.range_bounds()) {
       scan_choices_.reset(new HybridScanChoices(
-          doc_read_context_.schema, doc_spec, lower_doc_key, upper_doc_key));
+          doc_read_context_.schema, doc_spec, lower_doc_key, upper_doc_key, trace_id_));
     }
 
     return false;
   }
 
   if (doc_spec.range_options()) {
-    scan_choices_.reset(new DiscreteScanChoices(doc_spec, lower_doc_key, upper_doc_key));
+    scan_choices_.reset(new DiscreteScanChoices(doc_spec, lower_doc_key, upper_doc_key, trace_id_));
     // Let's not seek to the lower doc key or upper doc key. We know exactly what we want.
     RETURN_NOT_OK(AdvanceIteratorToNextDesiredRow());
     return true;
   }
 
   if (doc_spec.range_bounds()) {
-    scan_choices_.reset(new RangeBasedScanChoices(doc_read_context_.schema, doc_spec));
+    scan_choices_.reset(new RangeBasedScanChoices(doc_read_context_.schema, doc_spec, trace_id_));
   }
 
   return false;
@@ -1298,11 +1316,11 @@ template <class T>
 Status DocRowwiseIterator::DoInit(const T& doc_spec) {
   is_forward_scan_ = doc_spec.is_forward_scan();
 
-  VLOG(4) << "Initializing iterator direction: " << (is_forward_scan_ ? "FORWARD" : "BACKWARD");
+  VLOG_WITH_PREFIX(4) << "Initializing iterator direction: " << (is_forward_scan_ ? "FORWARD" : "BACKWARD");
 
   auto lower_doc_key = VERIFY_RESULT(doc_spec.LowerBound());
   auto upper_doc_key = VERIFY_RESULT(doc_spec.UpperBound());
-  VLOG(4) << "DocKey Bounds " << DocKey::DebugSliceToString(lower_doc_key.AsSlice())
+  VLOG_WITH_PREFIX(4) << "DocKey Bounds " << DocKey::DebugSliceToString(lower_doc_key.AsSlice())
           << ", " << DocKey::DebugSliceToString(upper_doc_key.AsSlice());
 
   // TODO(bogdan): decide if this is a good enough heuristic for using blooms for scans.
@@ -1335,7 +1353,7 @@ Status DocRowwiseIterator::DoInit(const T& doc_spec) {
         !is_forward_scan_ && has_bound_key_ ? bound_key_ : lower_doc_key,
         is_forward_scan_ && has_bound_key_ ? bound_key_ : upper_doc_key))) {
     if (is_forward_scan_) {
-      VLOG(3) << __PRETTY_FUNCTION__ << " Seeking to " << DocKey::DebugSliceToString(lower_doc_key);
+      VLOG_WITH_PREFIX(3) << __PRETTY_FUNCTION__ << " Seeking to " << DocKey::DebugSliceToString(lower_doc_key);
       db_iter_->Seek(lower_doc_key);
     } else {
       // TODO consider adding an operator bool to DocKey to use instead of empty() here.
@@ -1369,7 +1387,7 @@ Status DocRowwiseIterator::AdvanceIteratorToNextDesiredRow() const {
     }
   } else {
     if (!is_forward_scan_) {
-      VLOG(4) << __PRETTY_FUNCTION__ << " setting as PrevDocKey";
+      VLOG_WITH_PREFIX(4) << __PRETTY_FUNCTION__ << " setting as PrevDocKey";
       db_iter_->PrevDocKey(row_key_);
     }
   }
@@ -1378,7 +1396,7 @@ Status DocRowwiseIterator::AdvanceIteratorToNextDesiredRow() const {
 }
 
 Result<bool> DocRowwiseIterator::HasNext() const {
-  VLOG(4) << __PRETTY_FUNCTION__;
+  VLOG_WITH_PREFIX(4) << __PRETTY_FUNCTION__;
 
   // Repeated HasNext calls (without Skip/NextRow in between) should be idempotent:
   // 1. If a previous call failed we returned the same status.
@@ -1402,12 +1420,12 @@ Result<bool> DocRowwiseIterator::HasNext() const {
 
     const auto key_data = db_iter_->FetchKey();
     if (!key_data.ok()) {
-      VLOG(4) << __func__ << ", key data: " << key_data.status();
+      VLOG_WITH_PREFIX(4) << __func__ << ", key data: " << key_data.status();
       has_next_status_ = key_data.status();
       return has_next_status_;
     }
 
-    VLOG(4) << "*fetched_key is " << SubDocKey::DebugSliceToString(key_data->key);
+    VLOG_WITH_PREFIX(4) << "*fetched_key is " << SubDocKey::DebugSliceToString(key_data->key);
     if (debug_dump_) {
       LOG(INFO) << __func__ << ", fetched key: " << SubDocKey::DebugSliceToString(key_data->key)
                 << ", " << key_data->key.ToDebugHexString();
@@ -1426,7 +1444,7 @@ Result<bool> DocRowwiseIterator::HasNext() const {
       return has_next_status_;
     }
     iter_key_.Reset(key_data->key);
-    VLOG(4) << " Current iter_key_ is " << iter_key_;
+    VLOG_WITH_PREFIX(4) << " Current iter_key_ is " << iter_key_;
 
     const auto dockey_sizes = DocKey::EncodedHashPartAndDocKeySizes(iter_key_);
     if (!dockey_sizes.ok()) {
@@ -1445,7 +1463,7 @@ Result<bool> DocRowwiseIterator::HasNext() const {
 
     // Prepare the DocKey to get the SubDocument. Trim the DocKey to contain just the primary key.
     Slice doc_key = row_key_;
-    VLOG(4) << " sub_doc_key part of iter_key_ is " << DocKey::DebugSliceToString(doc_key);
+    VLOG_WITH_PREFIX(4) << " sub_doc_key part of iter_key_ is " << DocKey::DebugSliceToString(doc_key);
 
     bool is_static_column = IsNextStaticColumn();
     if (scan_choices_ && !is_static_column) {
@@ -1490,7 +1508,7 @@ Result<bool> DocRowwiseIterator::HasNext() const {
     }
     has_next_status_ = AdvanceIteratorToNextDesiredRow();
     RETURN_NOT_OK(has_next_status_);
-    VLOG(4) << __func__ << ", iter: " << db_iter_->valid();
+    VLOG_WITH_PREFIX(4) << __func__ << ", iter: " << db_iter_->valid();
   }
   row_ready_ = true;
   return true;
@@ -1534,7 +1552,7 @@ void DocRowwiseIterator::SkipRow() {
 HybridTime DocRowwiseIterator::RestartReadHt() {
   auto max_seen_ht = db_iter_->max_seen_ht();
   if (max_seen_ht.is_valid() && max_seen_ht > db_iter_->read_time().read) {
-    VLOG(4) << "Restart read: " << max_seen_ht << ", original: " << db_iter_->read_time();
+    VLOG_WITH_PREFIX(4) << "Restart read: " << max_seen_ht << ", original: " << db_iter_->read_time();
     return max_seen_ht;
   }
   return HybridTime::kInvalid;
@@ -1545,7 +1563,7 @@ bool DocRowwiseIterator::IsNextStaticColumn() const {
 }
 
 Status DocRowwiseIterator::DoNextRow(const Schema& projection, QLTableRow* table_row) {
-  VLOG(4) << __PRETTY_FUNCTION__;
+  VLOG_WITH_PREFIX(4) << __PRETTY_FUNCTION__;
 
   if (PREDICT_FALSE(done_)) {
     return STATUS(NotFound, "end of iter");
@@ -1606,14 +1624,14 @@ Status DocRowwiseIterator::GetNextReadSubDocKey(SubDocKey* sub_doc_key) const {
 
   // There are no more rows to fetch, so no next SubDocKey to read.
   if (!VERIFY_RESULT(HasNext())) {
-    DVLOG(3) << "No Next SubDocKey";
+    DVLOG_WITH_PREFIX(3) << "No Next SubDocKey";
     return Status::OK();
   }
 
   DocKey doc_key;
   RETURN_NOT_OK(doc_key.FullyDecodeFrom(row_key_));
   *sub_doc_key = SubDocKey(doc_key, read_time_.read);
-  DVLOG(3) << "Next SubDocKey: " << sub_doc_key->ToString();
+  DVLOG_WITH_PREFIX(3) << "Next SubDocKey: " << sub_doc_key->ToString();
   return Status::OK();
 }
 

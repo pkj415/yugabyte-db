@@ -94,7 +94,8 @@ class AbstractTablet {
       const TransactionMetadataPB& transaction_metadata,
       const SubTransactionMetadataPB& subtransaction_metadata,
       PgsqlReadRequestResult* result,
-      size_t* number_rows_read) = 0;
+      size_t* number_rows_read,
+      uint64_t trace_id) = 0;
 
   virtual Result<IsolationLevel> GetIsolationLevel(const TransactionMetadataPB& transaction) = 0;
 
@@ -120,7 +121,8 @@ class AbstractTablet {
                                          const std::shared_ptr<TableInfo>& table_info,
                                          const TransactionOperationContext& txn_op_context,
                                          PgsqlReadRequestResult* result,
-                                         size_t* num_rows_read);
+                                         size_t* num_rows_read,
+                                         uint64_t trace_id);
 
   virtual bool IsTransactionalRequest(bool is_ysql_request) const = 0;
 

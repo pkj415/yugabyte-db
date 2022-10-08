@@ -328,6 +328,7 @@ class PgSession : public RefCountedThreadSafe<PgSession> {
   bool HasWriteOperationsInDdlMode() const;
 
   Result<bool> CheckIfPitrActive();
+  uint64_t GetPgClientSessionId() const;
 
  private:
   Result<PerformFuture> FlushOperations(

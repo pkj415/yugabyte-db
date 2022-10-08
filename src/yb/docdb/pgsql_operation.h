@@ -36,12 +36,15 @@ class PgsqlWriteOperation :
  public:
   PgsqlWriteOperation(std::reference_wrapper<const PgsqlWriteRequestPB> request,
                       DocReadContextPtr doc_read_context,
-                      const TransactionOperationContext& txn_op_context)
+                      const TransactionOperationContext& txn_op_context,
+                      uint64_t trace_id)
       : DocOperationBase(request),
         doc_read_context_(std::move(doc_read_context)),
-        txn_op_context_(txn_op_context) {
+        txn_op_context_(txn_op_context),
+        trace_id_(trace_id) {
   }
 
+  std::string LogPrefix() const;
   // Initialize PgsqlWriteOperation. Content of request will be swapped out by the constructor.
   Status Init(PgsqlResponsePB* response);
   bool RequireReadSnapshot() const override {
@@ -130,16 +133,19 @@ class PgsqlWriteOperation :
   // Rows result requested.
   int64_t result_rows_ = 0;
   faststring result_buffer_;
+  uint64_t trace_id_ = 0;
 };
 
 class PgsqlReadOperation : public DocExprExecutor {
  public:
   // Construct and access methods.
   PgsqlReadOperation(const PgsqlReadRequestPB& request,
-                     const TransactionOperationContext& txn_op_context)
-      : request_(request), txn_op_context_(txn_op_context) {
+                     const TransactionOperationContext& txn_op_context,
+                     uint64_t trace_id)
+      : request_(request), txn_op_context_(txn_op_context), trace_id_(trace_id) {
   }
 
+  std::string LogPrefix() const;
   const PgsqlReadRequestPB& request() const { return request_; }
   PgsqlResponsePB& response() { return response_; }
 
@@ -220,6 +226,7 @@ class PgsqlReadOperation : public DocExprExecutor {
   PgsqlResponsePB response_;
   YQLRowwiseIteratorIf::UniPtr table_iter_;
   YQLRowwiseIteratorIf::UniPtr index_iter_;
+  uint64_t trace_id_ = 0;
 };
 
 }  // namespace docdb

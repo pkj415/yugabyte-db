@@ -125,6 +125,8 @@ class YBSession : public std::enable_shared_from_this<YBSession> {
   // TODO: add "doAs" ability here for proxy servers to be able to act on behalf of
   // other users, assuming access rights.
 
+  void SetTraceId(uint64_t trace_id);
+
   // Apply the write operation.
   //
   // Applied operations just added to the session and waits to be flushed.

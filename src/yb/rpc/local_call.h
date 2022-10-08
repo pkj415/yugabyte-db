@@ -114,12 +114,16 @@ auto HandleCall(InboundCallPtr call, F f) {
     auto* resp = yb::down_cast<typename Params::ResponseType*>(
         Params::CastMessage(outbound_call->response()));
     RpcContext rpc_context(std::move(local_call));
+    VLOG(4) << "In bound local call - " << yb_call->ToString()
+               << " req: " << req->ShortDebugString();
     f(req, resp, std::move(rpc_context));
   } else {
     auto params = std::make_shared<Params>();
     auto* req = &params->request();
     auto* resp = &params->response();
     RpcContext rpc_context(yb_call, std::move(params));
+    VLOG(4) << "In bound call - " << yb_call->ToString()
+               << " req: " << req->ShortDebugString();
     if (!rpc_context.responded()) {
       f(req, resp, std::move(rpc_context));
     }

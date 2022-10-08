@@ -120,14 +120,24 @@ WriteQuery::WriteQuery(
     WriteQueryContext* context,
     Tablet* tablet,
     tserver::WriteResponsePB* response,
-    docdb::OperationKind kind)
+    docdb::OperationKind kind,
+    uint64_t trace_id)
     : operation_(std::make_unique<WriteOperation>(tablet)),
       term_(term), deadline_(deadline),
       context_(context),
+      trace_id_(trace_id),
       response_(response),
       kind_(kind),
       start_time_(CoarseMonoClock::Now()),
       execute_mode_(ExecuteMode::kSimple) {
+}
+
+uint64_t WriteQuery::TraceId() const {
+  return trace_id_;
+}
+
+std::string WriteQuery::LogPrefix() const {
+  return Format("-$0- ", trace_id_);
 }
 
 WritePB& WriteQuery::request() {
@@ -184,6 +194,8 @@ void WriteQuery::set_client_request(std::reference_wrapper<const tserver::WriteR
   client_request_ = &req.get();
   read_time_ = ReadHybridTime::FromReadTimePB(req.get());
   allow_immediate_read_restart_ = !read_time_;
+  if(client_request_->has_trace_id())
+    trace_id_ = client_request_->trace_id();
 }
 
 void WriteQuery::set_client_request(std::unique_ptr<tserver::WriteRequestPB> req) {
@@ -381,7 +393,8 @@ Result<bool> WriteQuery::PgsqlPrepareExecute() {
     auto write_op = std::make_unique<docdb::PgsqlWriteOperation>(
         req,
         rpc::SharedField(table_info, table_info->doc_read_context.get()),
-        txn_op_ctx);
+        txn_op_ctx,
+        client_request_->trace_id());
     RETURN_NOT_OK(write_op->Init(resp));
     doc_ops_.emplace_back(std::move(write_op));
   }
@@ -457,7 +470,8 @@ Status WriteQuery::DoExecute() {
           }
           NonTransactionalConflictsResolved(now, *result);
           TRACE("NonTransactionalConflictsResolved");
-        });
+        },
+        trace_id_);
   }
 
   if (isolation_level_ == IsolationLevel::SERIALIZABLE_ISOLATION &&
@@ -495,7 +509,8 @@ Status WriteQuery::DoExecute() {
         }
         TransactionalConflictsResolved();
         TRACE("TransactionalConflictsResolved");
-      });
+      },
+      trace_id_);
 }
 
 void WriteQuery::NonTransactionalConflictsResolved(HybridTime now, HybridTime result) {

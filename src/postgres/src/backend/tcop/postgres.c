@@ -4446,7 +4446,7 @@ yb_attempt_to_restart_on_error(int attempt,
 			 * In this case the txn is not restarted, just the statement is restarted after rolling back
 			 * to the internal savepoint registered at start of the statement.
 			 */
-			elog(DEBUG1, "Rolling back statement");
+			elog(LOG, "Rolling back statement");
 
 			/*
 			 * Presence of triggers pushes additional snapshots. Pop all of them.
@@ -4514,7 +4514,7 @@ yb_attempt_to_restart_on_error(int attempt,
 			 * In this case the txn is restarted, which can be done since we haven't executed even the
 			 * first statement fully and no data has been sent to the client.
 			 */
-			elog(DEBUG1, "Restarting txn");
+			elog(LOG, "Restarting txn");
 
 			/*
 			 * The txn might or might not have performed writes. Reset the state in
@@ -4604,6 +4604,7 @@ yb_exec_query_wrapper(MemoryContext exec_context,
 					  const void* functor_context)
 {
 	bool retry = true;
+	// trace_uuid = 
 	for (int attempt = 0; retry; ++attempt)
 	{
 		yb_exec_query_wrapper_one_attempt(

@@ -68,7 +68,8 @@ Status ResolveTransactionConflicts(const DocOperations& doc_ops,
                                    Counter* conflicts_metric,
                                    LockBatch* lock_batch,
                                    WaitQueue* wait_queue,
-                                   ResolutionCallback callback);
+                                   ResolutionCallback callback,
+                                   uint64_t trace_id);
 
 // Resolves conflicts for doc operations.
 // Read all intents that could conflict with provided doc_ops.
@@ -90,7 +91,8 @@ Status ResolveOperationConflicts(const DocOperations& doc_ops,
                                  Counter* conflicts_metric,
                                  LockBatch* lock_batch,
                                  WaitQueue* wait_queue,
-                                 ResolutionCallback callback);
+                                 ResolutionCallback callback,
+                                 uint64_t trace_id);
 
 struct ParsedIntent {
   // Intent DocPath.
