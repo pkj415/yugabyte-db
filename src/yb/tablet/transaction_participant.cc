@@ -344,11 +344,13 @@ class TransactionParticipant::Impl
     std::lock_guard<std::mutex> lock(mutex_);
     auto result = NextRequestIdUnlocked();
     running_requests_.push_back(result);
+    VLOG(4) << "Registered new request " << result;
     return result;
   }
 
   // Unregisters a previously registered request.
   void UnregisterRequest(int64_t request) {
+    VLOG(4) << "Removing request " << request;
     MinRunningNotifier min_running_notifier(&applier_);
     bool notify_completed;
     {
@@ -437,6 +439,9 @@ class TransactionParticipant::Impl
     while (!queue->empty()) {
       const auto& front = queue->front();
       if (front.request_id >= min_request) {
+        VLOG(3) << "Not cleaning transaction " << front.transaction_id
+                << " with request id " << front.request_id
+                << " greater than min request " << min_request;
         break;
       }
       if (!front.Ready(&participant_context_, &safe_time)) {
@@ -459,7 +464,8 @@ class TransactionParticipant::Impl
         (**it).ScheduleRemoveIntents(*it);
         RemoveTransaction(it, front.reason, min_running_notifier);
       }
-      VLOG_WITH_PREFIX(2) << "Cleaned from queue: " << id;
+      VLOG_WITH_PREFIX(2) << "Cleaned from queue: " << front.transaction_id
+                          << " with running request id: " << front.request_id;
       queue->pop_front();
     }
   }
@@ -813,6 +819,7 @@ class TransactionParticipant::Impl
 
   HybridTime MinRunningHybridTime() {
     auto result = min_running_ht_.load(std::memory_order_acquire);
+    VLOG_WITH_PREFIX(2) << "min_running_ht_ " << result;
     if (result == HybridTime::kMax || result == HybridTime::kInvalid) {
       return result;
     }
@@ -1186,6 +1193,8 @@ class TransactionParticipant::Impl
 
     auto& first_txn = **transactions_.get<StartTimeTag>().begin();
     if (first_txn.start_ht() != min_running_ht_.load(std::memory_order_relaxed)) {
+      VLOG_WITH_PREFIX(4) << "Storing min running " << first_txn.start_ht()
+                          << " for transaction " << first_txn.id();
       min_running_ht_.store(first_txn.start_ht(), std::memory_order_release);
       next_check_min_running_.store(
           CoarseMonoClock::now() + 1ms * FLAGS_transaction_min_running_check_delay_ms,

@@ -250,6 +250,7 @@ IntentAwareIterator::IntentAwareIterator(
 
   if (txn_op_context) {
     if (txn_op_context.txn_status_manager->MinRunningHybridTime() != HybridTime::kMax) {
+      VLOG(2) << "Initializing intent iter";
       intent_iter_ = docdb::CreateRocksDBIterator(doc_db.intents,
                                                   doc_db.key_bounds,
                                                   docdb::BloomFilterMode::DONT_USE_BLOOM_FILTER,
@@ -258,7 +259,7 @@ IntentAwareIterator::IntentAwareIterator(
                                                   nullptr /* file_filter */,
                                                   &intent_upperbound_);
     } else {
-      VLOG(4) << "No transactions running";
+      VLOG(2) << "No transactions running";
     }
   }
   // WARNING: Is is important for regular DB iterator to be created after intents DB iterator,

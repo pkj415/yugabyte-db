@@ -157,11 +157,10 @@ class ConflictResolver : public std::enable_shared_from_this<ConflictResolver> {
  public:
   ConflictResolver(const DocDB& doc_db,
                    TransactionStatusManager* status_manager,
-                   RequestScope request_scope,
                    PartialRangeKeyIntents partial_range_key_intents,
                    std::unique_ptr<ConflictResolverContext> context,
                    ResolutionCallback callback)
-      : doc_db_(doc_db), status_manager_(*status_manager), request_scope_(std::move(request_scope)),
+      : doc_db_(doc_db), status_manager_(*status_manager),
         partial_range_key_intents_(partial_range_key_intents), context_(std::move(context)),
         callback_(std::move(callback)) {}
 
@@ -200,7 +199,6 @@ class ConflictResolver : public std::enable_shared_from_this<ConflictResolver> {
 
   // Reset all state to prepare for running conflict resolution again.
   void Reset() {
-    intent_iter_.Reset();
     DCHECK(intent_key_upperbound_.empty());
     conflicts_.clear();
     transactions_.clear();
@@ -562,13 +560,11 @@ class OptimisticLockingConflictResolver : public ConflictResolver {
   OptimisticLockingConflictResolver(
       const DocDB& doc_db,
       TransactionStatusManager* status_manager,
-      RequestScope request_scope,
       PartialRangeKeyIntents partial_range_key_intents,
       std::unique_ptr<ConflictResolverContext> context,
       ResolutionCallback callback)
     : ConflictResolver(
-        doc_db, status_manager, std::move(request_scope), partial_range_key_intents,
-        std::move(context), std::move(callback))
+        doc_db, status_manager, partial_range_key_intents, std::move(context), std::move(callback))
     {}
 
   Status OnConflictingTransactionsFound() override {
@@ -619,16 +615,14 @@ class PessimisticLockingConflictResolver : public ConflictResolver {
   PessimisticLockingConflictResolver(
       const DocDB& doc_db,
       TransactionStatusManager* status_manager,
-      RequestScope request_scope,
       PartialRangeKeyIntents partial_range_key_intents,
       std::unique_ptr<ConflictResolverContext> context,
       ResolutionCallback callback,
       WaitQueue* wait_queue,
       LockBatch* lock_batch)
         : ConflictResolver(
-        doc_db, status_manager, std::move(request_scope), partial_range_key_intents,
-        std::move(context), std::move(callback)), wait_queue_(wait_queue),
-        lock_batch_(lock_batch) {}
+        doc_db, status_manager, partial_range_key_intents, std::move(context), std::move(callback)),
+        wait_queue_(wait_queue), lock_batch_(lock_batch) {}
 
   Status OnConflictingTransactionsFound() override {
     DCHECK_GT(remaining_transactions_, 0);
@@ -673,10 +667,10 @@ class PessimisticLockingConflictResolver : public ConflictResolver {
 
     // If status from wait_queue is OK, then all blockers read earlier are now resolved. Retry
     // conflict resolution with all state reset.
+    Reset();
     // TODO(pessimistic): In case wait queue finds that a blocker was committed, and if that blocker
     // has still-live modification conflicts with this operation (i.e. not from rolled back subtxn),
     // we can avoid re-running conflict resolution here and just abort.
-    Reset();
     Resolve();
   }
 
@@ -1238,17 +1232,15 @@ Status ResolveTransactionConflicts(const DocOperations& doc_ops,
   TRACE_FUNC();
   auto context = std::make_unique<TransactionConflictResolverContext>(
       doc_ops, write_batch, hybrid_time, read_time, conflicts_metric);
-  auto request_scope = VERIFY_RESULT(RequestScope::Create(status_manager));
   if (wait_queue) {
     DCHECK(lock_batch);
     auto resolver = std::make_shared<PessimisticLockingConflictResolver>(
-        doc_db, status_manager, std::move(request_scope), partial_range_key_intents,
-        std::move(context), std::move(callback), wait_queue, lock_batch);
+        doc_db, status_manager, partial_range_key_intents, std::move(context), std::move(callback),
+        wait_queue, lock_batch);
     resolver->Resolve();
   } else {
     auto resolver = std::make_shared<OptimisticLockingConflictResolver>(
-        doc_db, status_manager, std::move(request_scope), partial_range_key_intents,
-        std::move(context), std::move(callback));
+        doc_db, status_manager, partial_range_key_intents, std::move(context), std::move(callback));
     resolver->Resolve();
   }
   TRACE("resolver->Resolve done");
@@ -1267,16 +1259,14 @@ Status ResolveOperationConflicts(const DocOperations& doc_ops,
   TRACE("ResolveOperationConflicts");
   auto context = std::make_unique<OperationConflictResolverContext>(&doc_ops, resolution_ht,
                                                                     conflicts_metric);
-  auto request_scope = VERIFY_RESULT(RequestScope::Create(status_manager));
   if (wait_queue) {
     auto resolver = std::make_shared<PessimisticLockingConflictResolver>(
-        doc_db, status_manager, std::move(request_scope), partial_range_key_intents,
-        std::move(context), std::move(callback), wait_queue, lock_batch);
+        doc_db, status_manager, partial_range_key_intents, std::move(context), std::move(callback),
+        wait_queue, lock_batch);
     resolver->Resolve();
   } else {
     auto resolver = std::make_shared<OptimisticLockingConflictResolver>(
-        doc_db, status_manager, std::move(request_scope), partial_range_key_intents,
-        std::move(context), std::move(callback));
+        doc_db, status_manager, partial_range_key_intents, std::move(context), std::move(callback));
     resolver->Resolve();
   }
   TRACE("resolver->Resolve done");

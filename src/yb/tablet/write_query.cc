@@ -411,6 +411,8 @@ void WriteQuery::Execute(std::unique_ptr<WriteQuery> query) {
 }
 
 Status WriteQuery::DoExecute() {
+  TRACE("DoExecute Start");
+
   auto& write_batch = *request().mutable_write_batch();
   isolation_level_ = VERIFY_RESULT(tablet().GetIsolationLevelFromPB(write_batch));
   const RowMarkType row_mark_type = GetRowMarkTypeFromPB(write_batch);
@@ -430,6 +432,8 @@ Status WriteQuery::DoExecute() {
       doc_ops_, write_batch.read_pairs(), tablet().metrics()->write_lock_latency,
       isolation_level_, kind(), row_mark_type, transactional_table, write_batch.has_transaction(),
       deadline(), partial_range_key_intents, tablet().shared_lock_manager()));
+
+  TRACE("DoExecute Done Prepare");
 
   TEST_SYNC_POINT("WriteQuery::DoExecute::PreparedDocWriteOps");
 

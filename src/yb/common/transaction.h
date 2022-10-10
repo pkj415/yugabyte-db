@@ -235,7 +235,6 @@ class NODISCARD_CLASS RequestScope {
   void Reset() {
     if (status_manager_) {
       status_manager_->UnregisterRequest(request_id_);
-      status_manager_ = nullptr;
     }
   }
 

@@ -1223,6 +1223,8 @@ Status Tablet::WriteTransactionalBatch(
     HybridTime hybrid_time,
     const rocksdb::UserFrontiers* frontiers,
     bool external_transaction) {
+  VTRACE(1, "WriteTransactionalBatch start");
+
   auto transaction_id = CHECK_RESULT(
       FullyDecodeTransactionId(put_batch.transaction().transaction_id()));
 
@@ -1270,6 +1272,7 @@ Status Tablet::WriteTransactionalBatch(
   last_batch_data.next_write_id = writer.intra_txn_write_id();
   transaction_participant()->BatchReplicated(transaction_id, last_batch_data);
 
+  VTRACE(1, "WriteTransactionalBatch end");
   return Status::OK();
 }
 
