@@ -1812,5 +1812,9 @@ Result<bool> PgApiImpl::CheckIfPitrActive() {
   return pg_session_->CheckIfPitrActive();
 }
 
+uint64_t PgApiImpl::GetPgClientSessionId() const {
+  return pg_session_->GetPgClientSessionId();
+}
+
 } // namespace pggate
 } // namespace yb

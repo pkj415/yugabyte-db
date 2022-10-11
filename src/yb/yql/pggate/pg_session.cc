@@ -808,5 +808,9 @@ Result<bool> PgSession::CheckIfPitrActive() {
   return pg_client_.CheckIfPitrActive();
 }
 
+uint64_t PgSession::GetPgClientSessionId() const {
+  return pg_client_.GetSessionId();
+}
+
 }  // namespace pggate
 }  // namespace yb

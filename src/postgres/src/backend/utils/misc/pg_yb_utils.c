@@ -554,6 +554,7 @@ YBInitPostgresBackend(
 		 * TODO: do we really need to DB name / username here?
 		 */
 		HandleYBStatus(YBCPgInitSession(db_name ? db_name : user_name));
+		elog(LOG, "Pg client session id %" PRIu64 "", YBCGetPgClientSessionId());
 	}
 }
 

@@ -27,6 +27,7 @@ extern "C" {
 // This must be called exactly once to initialize the YB/PostgreSQL gateway API before any other
 // functions in this API are called.
 void YBCInitPgGate(const YBCPgTypeEntity *YBCDataTypeTable, int count, YBCPgCallbacks pg_callbacks);
+uint64_t YBCGetPgClientSessionId();
 void YBCDestroyPgGate();
 void YBCInterruptPgGate();
 

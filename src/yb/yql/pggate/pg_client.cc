@@ -528,6 +528,10 @@ class PgClient::Impl {
     return resp;
   }
 
+  uint64_t GetSessionId() const {
+    return session_id_;
+  }
+
   #define YB_PG_CLIENT_SIMPLE_METHOD_IMPL(r, data, method) \
   Status method( \
       tserver::BOOST_PP_CAT(BOOST_PP_CAT(Pg, method), RequestPB)* req, \
@@ -718,6 +722,10 @@ Result<bool> PgClient::CheckIfPitrActive() {
 
 Result<tserver::PgGetTserverCatalogVersionInfoResponsePB> PgClient::GetTserverCatalogVersionInfo() {
   return impl_->GetTserverCatalogVersionInfo();
+}
+
+uint64_t PgClient::GetSessionId() const {
+  return impl_->GetSessionId();
 }
 
 #define YB_PG_CLIENT_SIMPLE_METHOD_DEFINE(r, data, method) \
