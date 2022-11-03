@@ -1019,10 +1019,14 @@ Result<size_t> PgsqlReadOperation::ExecuteSample(const YQLStorageIf& ql_storage,
   // it skips. For a large enough table it eventually starts to select less than targrows per page,
   // regardless of the row_count_limit.
   // Anyways, double targrows seems like reasonable minimum for the row_count_limit.
-  size_t row_count_limit = 2 * targrows;
-  if (request_.has_limit() && request_.limit() > row_count_limit) {
-    row_count_limit = request_.limit();
-  }
+
+  // TODO(analyze-sampling): Do we need the below?
+  // if (request_.has_limit() && request_.limit() > row_count_limit) {
+  //   row_count_limit = request_.limit();
+  // }
+
+  VLOG(2) << "Start sampling tablet with sampling_state=" << sampling_state.ShortDebugString();
+
   // Request is not supposed to contain any column refs, we just need the liveness column.
   Schema projection;
   RETURN_NOT_OK(CreateProjection(doc_read_context.schema, request_.column_refs(), &projection));
@@ -1032,9 +1036,8 @@ Result<size_t> PgsqlReadOperation::ExecuteSample(const YQLStorageIf& ql_storage,
       deadline, read_time, is_explicit_request_read_time));
   bool scan_time_exceeded = false;
   CoarseTimePoint stop_scan = deadline - FLAGS_ysql_scan_deadline_margin_ms * 1ms;
-  while (scanned_rows++ < row_count_limit &&
-         VERIFY_RESULT(table_iter_->HasNext()) &&
-         !scan_time_exceeded) {
+  while (VERIFY_RESULT(table_iter_->HasNext())) {
+    scanned_rows++;
     if (numrows < targrows) {
       // Select first targrows of the table. If first partition(s) have less than that, next
       // partition starts to continue populating it's reservoir starting from the numrows' position:
@@ -1057,6 +1060,7 @@ Result<size_t> PgsqlReadOperation::ExecuteSample(const YQLStorageIf& ql_storage,
         reservoir[k].set_binary_value(ybctid.data(), ybctid.size());
         // Choose next number of rows to skip
         YbgReservoirGetNextS(rstate, samplerows, targrows, &rowstoskip);
+        VLOG(4) << "Next reservoir sampling rowstoskip=" << rowstoskip;
       } else {
         rowstoskip -= 1;
       }
@@ -1065,9 +1069,13 @@ Result<size_t> PgsqlReadOperation::ExecuteSample(const YQLStorageIf& ql_storage,
     table_iter_->SkipRow();
     // Check if we are running out of time
     scan_time_exceeded = CoarseMonoClock::now() >= stop_scan;
+    if (scan_time_exceeded) {
+      LOG(WARNING) << "ANALZYE sampling scan exceeded deadline";
+      break;
+    }
   }
   // Count live rows we have scanned TODO how to count dead rows?
-  samplerows += scanned_rows - 1;
+  samplerows += scanned_rows;
   // Return collected tuples from the reservoir.
   // Tuples are returned as (index, ybctid) pairs, where index is in [0..targrows-1] range.
   // As mentioned above, for large tables reservoirs become increasingly sparse from page to page.
@@ -1097,10 +1105,8 @@ Result<size_t> PgsqlReadOperation::ExecuteSample(const YQLStorageIf& ql_storage,
   new_sampling_state->set_rand_state(randstate);
   YbgDeleteMemoryContext();
 
-  // Return paging state if scan has not been completed
-  RETURN_NOT_OK(SetPagingStateIfNecessary(
-      table_iter_.get(), scanned_rows, row_count_limit, scan_time_exceeded,
-      doc_read_context.schema, read_time, has_paging_state));
+  VLOG(2) << "End sampling with new_sampling_state=" << new_sampling_state->ShortDebugString();
+
   return fetched_rows;
 }
 

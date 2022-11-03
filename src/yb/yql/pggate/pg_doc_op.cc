@@ -743,9 +743,6 @@ Result<bool> PgDocReadOp::PopulateSamplingOps() {
   }
   active_op_count_ = partition_keys.size();
   VLOG(1) << "Number of partitions to sample: " << active_op_count_;
-  // If we have big enough sample after processing some partitions we skip the rest.
-  // By shuffling partitions we randomly select the partition(s) to sample.
-  std::shuffle(pgsql_ops_.begin(), pgsql_ops_.end(), ThreadLocalRandom());
 
   return true;
 }
@@ -880,19 +877,13 @@ Status PgDocReadOp::CompleteProcessResponse() {
       // Current sampling op without paging state means that previous one was completed and moved
       // outside.
       auto sampling_state = req->mutable_sampling_state();
-      if (sample_rows_ < sampling_state->targrows()) {
-        // More sample rows are needed, update sampling state and let next partition be scanned
-        VLOG(1) << "Continue sampling next partition from " << sample_rows_;
-        sampling_state->set_numrows(static_cast<int32>(sample_rows_));
-        sampling_state->set_samplerows(sample_rows_);
-      } else {
-        // Have enough of sample rows, estimate total table rows assuming they are evenly
-        // distributed between partitions
-        auto completed_ops = pgsql_ops_.size() - active_op_count_;
-        sample_rows_ = floor((sample_rows_ / completed_ops) * pgsql_ops_.size() + 0.5);
-        VLOG(1) << "Done sampling, prorated rowcount is " << sample_rows_;
-        end_of_data_ = true;
-      }
+
+      // Update sampling state and let next partition be scanned
+      VLOG(1) << "Continue sampling next partition from " << sample_rows_;
+      sampling_state->set_numrows(
+        sample_rows_ < sampling_state->targrows() ? static_cast<int32>(sample_rows_)
+                                                  : sampling_state->targrows());
+      sampling_state->set_samplerows(sample_rows_);
     }
   }
 
