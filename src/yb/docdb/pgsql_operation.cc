@@ -24,6 +24,7 @@
 #include "yb/common/pg_system_attr.h"
 #include "yb/common/ql_value.h"
 
+#include "yb/common/transaction.pb.h"
 #include "yb/docdb/doc_path.h"
 #include "yb/docdb/doc_pg_expr.h"
 #include "yb/docdb/doc_pgsql_scanspec.h"
@@ -1399,7 +1400,7 @@ Status PgsqlReadOperation::SetPagingStateIfNecessary(YQLRowwiseIteratorIf* iter,
       *has_paging_state = true;
     }
   }
-  if (*has_paging_state) {
+  if (*has_paging_state && isolation_level_ != SERIALIZABLE_ISOLATION) {
     if (FLAGS_pgsql_consistent_transactional_paging) {
       read_time.AddToPB(response_.mutable_paging_state());
     } else {

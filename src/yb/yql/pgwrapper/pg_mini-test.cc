@@ -1954,6 +1954,32 @@ TEST_F(PgMiniTest, YB_DISABLE_TEST_IN_TSAN(DDLWithRestart)) {
   ASSERT_EQ(res, 0);
 }
 
+class PgMiniSmallPrefetchTest : public PgMiniSingleTServerTest {
+ protected:
+  void SetUp() override {
+    FLAGS_ysql_prefetch_limit = 1;
+    PgMiniTest::SetUp();
+  }
+};
+
+TEST_F_EX(
+    PgMiniTest, YB_DISABLE_TEST_IN_TSAN(TestPagingInSerializableIsolation),
+    PgMiniSmallPrefetchTest) {
+  // This test is related to #14284, #13041.
+  // As part of a regression, scenarios that involve paging in SERIALIZABLE isolation resulted in
+  // the following error - "Read time should NOT be specified for serializable isolation level".
+  //
+  // Refer this commit's summary for detailed information as to why the read time was set in
+  // SERIALIZABLE isolation when paging was involved.
+  auto conn = ASSERT_RESULT(Connect());
+  ASSERT_OK(conn.Execute("CREATE TABLE test (k INT PRIMARY KEY, v INT) SPLIT INTO 5 TABLETS"));
+  ASSERT_OK(conn.Execute("INSERT INTO test SELECT GENERATE_SERIES(1, 100)"));
+  ASSERT_OK(conn.Execute("BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE"));
+  ASSERT_OK(conn.Execute("DECLARE c CURSOR FOR SELECT * FROM test"));
+  ASSERT_OK(conn.Fetch("FETCH c"));
+  ASSERT_OK(conn.Fetch("FETCH c"));
+}
+
 class PgMiniRocksDbIteratorLoggingTest : public PgMiniSingleTServerTest {
  public:
   struct IteratorLoggingTestConfig {

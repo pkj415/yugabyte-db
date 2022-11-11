@@ -392,8 +392,8 @@ Status ReadQuery::DoPerform() {
     // TODO(dtxn) write request id
 
     RETURN_NOT_OK(leader_peer.tablet->CreateReadIntents(
-        req_->transaction(), req_->subtransaction(), req_->ql_batch(), req_->pgsql_batch(),
-        &write_batch));
+        req_->has_transaction(), req_->transaction(), req_->subtransaction(), req_->ql_batch(),
+        req_->pgsql_batch(), &write_batch));
 
     query->AdjustYsqlQueryTransactionality(req_->pgsql_batch_size());
 
@@ -662,8 +662,9 @@ Result<ReadHybridTime> ReadQuery::DoReadImpl() {
       TRACE("Start HandlePgsqlReadRequest");
       RETURN_NOT_OK(abstract_tablet_->HandlePgsqlReadRequest(
           context_.GetClientDeadline(), read_time,
-          !allow_retry_ /* is_explicit_request_read_time */, pgsql_read_req, req_->transaction(),
-          req_->subtransaction(), &result));
+          !allow_retry_ /* is_explicit_request_read_time */, pgsql_read_req,
+          req_->has_transaction(), req_->transaction(), req_->subtransaction(),
+          &result));
 
       total_num_rows_read += result.num_rows_read;
 

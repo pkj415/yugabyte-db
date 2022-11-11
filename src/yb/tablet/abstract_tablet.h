@@ -94,6 +94,7 @@ class AbstractTablet {
       const ReadHybridTime& read_time,
       bool is_explicit_request_read_time,
       const PgsqlReadRequestPB& ql_read_request,
+      bool has_transaction_metadata,
       const TransactionMetadataPB& transaction_metadata,
       const SubTransactionMetadataPB& subtransaction_metadata,
       PgsqlReadRequestResult* result) = 0;
@@ -123,7 +124,8 @@ class AbstractTablet {
                                  const PgsqlReadRequestPB& pgsql_read_request,
                                  const std::shared_ptr<TableInfo>& table_info,
                                  const TransactionOperationContext& txn_op_context,
-                                 PgsqlReadRequestResult* result);
+                                 PgsqlReadRequestResult* result,
+                                 IsolationLevel isolation_level);
 
   virtual bool IsTransactionalRequest(bool is_ysql_request) const = 0;
 

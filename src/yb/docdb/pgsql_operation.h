@@ -138,8 +138,9 @@ class PgsqlReadOperation : public DocExprExecutor {
  public:
   // Construct and access methods.
   PgsqlReadOperation(const PgsqlReadRequestPB& request,
-                     const TransactionOperationContext& txn_op_context)
-      : request_(request), txn_op_context_(txn_op_context) {
+                     const TransactionOperationContext& txn_op_context,
+                     IsolationLevel isolation_level)
+      : request_(request), txn_op_context_(txn_op_context), isolation_level_(isolation_level) {
   }
 
   const PgsqlReadRequestPB& request() const { return request_; }
@@ -219,6 +220,7 @@ class PgsqlReadOperation : public DocExprExecutor {
   //------------------------------------------------------------------------------------------------
   const PgsqlReadRequestPB& request_;
   const TransactionOperationContext txn_op_context_;
+  const IsolationLevel isolation_level_;
   PgsqlResponsePB response_;
   YQLRowwiseIteratorIf::UniPtr table_iter_;
   YQLRowwiseIteratorIf::UniPtr index_iter_;

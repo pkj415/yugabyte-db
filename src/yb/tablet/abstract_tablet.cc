@@ -92,8 +92,9 @@ Status AbstractTablet::ProcessPgsqlReadRequest(CoarseTimePoint deadline,
                                                const PgsqlReadRequestPB& pgsql_read_request,
                                                const std::shared_ptr<TableInfo>& table_info,
                                                const TransactionOperationContext& txn_op_context,
-                                               PgsqlReadRequestResult* result) {
-  docdb::PgsqlReadOperation doc_op(pgsql_read_request, txn_op_context);
+                                               PgsqlReadRequestResult* result,
+                                               IsolationLevel isolation_level) {
+  docdb::PgsqlReadOperation doc_op(pgsql_read_request, txn_op_context, isolation_level);
 
   // Form a schema of columns that are referenced by this query.
   const auto doc_read_context = rpc::SharedField(table_info, table_info->doc_read_context.get());

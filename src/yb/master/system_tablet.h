@@ -66,6 +66,7 @@ class SystemTablet : public tablet::AbstractTablet {
                                 const ReadHybridTime& read_time,
                                 bool is_explicit_request_read_time,
                                 const PgsqlReadRequestPB& pgsql_read_request,
+                                bool has_transaction_metadata,
                                 const TransactionMetadataPB& transaction_metadata,
                                 const SubTransactionMetadataPB& subtransaction_metadata,
                                 tablet::PgsqlReadRequestResult* result) override {

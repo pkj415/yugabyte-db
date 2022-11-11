@@ -378,6 +378,7 @@ class Tablet : public AbstractTablet, public TransactionIntentApplier {
       const ReadHybridTime& read_time,
       bool is_explicit_request_read_time,
       const PgsqlReadRequestPB& pgsql_read_request,
+      bool has_transaction_metadata,
       const TransactionMetadataPB& transaction_metadata,
       const SubTransactionMetadataPB& subtransaction_metadata,
       PgsqlReadRequestResult* result) override;
@@ -595,6 +596,7 @@ class Tablet : public AbstractTablet, public TransactionIntentApplier {
   size_t TEST_CountRegularDBRecords();
 
   Status CreateReadIntents(
+      bool has_transaction_metadata,
       const TransactionMetadataPB& transaction_metadata,
       const SubTransactionMetadataPB& subtransaction_metadata,
       const google::protobuf::RepeatedPtrField<QLReadRequestPB>& ql_batch,

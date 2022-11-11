@@ -1553,6 +1553,7 @@ Status Tablet::HandlePgsqlReadRequest(
     const ReadHybridTime& read_time,
     bool is_explicit_request_read_time,
     const PgsqlReadRequestPB& pgsql_read_request,
+    bool has_transaction_metadata,
     const TransactionMetadataPB& transaction_metadata,
     const SubTransactionMetadataPB& subtransaction_metadata,
     PgsqlReadRequestResult* result) {
@@ -1571,7 +1572,9 @@ Status Tablet::HandlePgsqlReadRequest(
   RETURN_NOT_OK(txn_op_ctx);
   auto status = ProcessPgsqlReadRequest(
       deadline, read_time, is_explicit_request_read_time,
-      pgsql_read_request, table_info, *txn_op_ctx, result);
+      pgsql_read_request, table_info, *txn_op_ctx, result,
+      has_transaction_metadata ? VERIFY_RESULT(GetIsolationLevel(transaction_metadata))
+                               : NON_TRANSACTIONAL);
 
   // Assert the table is a Postgres table.
   DCHECK_EQ(table_info->table_type, TableType::PGSQL_TABLE_TYPE);
@@ -3477,6 +3480,7 @@ Result<TransactionOperationContext> Tablet::CreateTransactionOperationContext(
 }
 
 Status Tablet::CreateReadIntents(
+    bool has_transaction_metadata,
     const TransactionMetadataPB& transaction_metadata,
     const SubTransactionMetadataPB& subtransaction_metadata,
     const google::protobuf::RepeatedPtrField<QLReadRequestPB>& ql_batch,
@@ -3497,7 +3501,10 @@ Status Tablet::CreateReadIntents(
     if (table_info == nullptr || table_info->table_id != pgsql_read.table_id()) {
       table_info = VERIFY_RESULT(metadata_->GetTableInfo(pgsql_read.table_id()));
     }
-    docdb::PgsqlReadOperation doc_op(pgsql_read, txn_op_ctx);
+    docdb::PgsqlReadOperation doc_op(
+        pgsql_read, txn_op_ctx,
+        has_transaction_metadata ? VERIFY_RESULT(GetIsolationLevel(transaction_metadata))
+                                 : NON_TRANSACTIONAL);
     RETURN_NOT_OK(doc_op.GetIntents(table_info->schema(), write_batch));
   }
 
