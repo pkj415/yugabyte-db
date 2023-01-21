@@ -239,7 +239,7 @@ public class TestPgTransparentRestarts extends BasePgSQLTest {
   /**
    * Same as the previous test but uses parameterized PreparedStatements with bindvars.
    */
-  @Ignore // TODO(alex, piyush): Enable after #14772 is fixed.
+  @Test
   public void selectStarShortPreparedParameterized() throws Exception {
     new PreparedStatementTester(
         getConnectionBuilder(),
