@@ -277,7 +277,7 @@ Status Master::RegisterServices() {
   RETURN_NOT_OK(RegisterService(FLAGS_master_svc_queue_length, MakeMasterEncryptionService(this)));
   RETURN_NOT_OK(RegisterService(FLAGS_master_svc_queue_length, MakeMasterHeartbeatService(this)));
   RETURN_NOT_OK(RegisterService(FLAGS_master_svc_queue_length,
-    MakeMasterMutationCounterService(this)));
+    MakeMasterMutationCounterService(this, catalog_manager_.get())));
   RETURN_NOT_OK(RegisterService(FLAGS_master_svc_queue_length, MakeMasterReplicationService(this)));
 
   std::unique_ptr<ServiceIf> master_tablet_service(

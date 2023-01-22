@@ -860,6 +860,7 @@ CatalogManager::CatalogManager(Master* master)
       tablespace_manager_(std::make_shared<YsqlTablespaceManager>(nullptr, nullptr)),
       tablespace_bg_task_running_(false),
       tablet_split_manager_(this, this, this, master_->metric_entity()) {
+  LOG(INFO) << "CatalogManager constructor";
   InitMasterFlags();
   CHECK_OK(ThreadPoolBuilder("leader-initialization")
                .set_max_threads(1)

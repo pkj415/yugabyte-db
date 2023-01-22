@@ -73,6 +73,16 @@ constexpr size_t kXCProducerTabletIdIdx = 1;
 static const char* const kXCSafeTime  = "safe_time";
 constexpr size_t kXCSafeTimeIdx = 2;
 
+static const char* const kAutoAnalyzeTableName = "auto_analyze";
+static const char* const kAutoAnalyzeTableId = "table_id";
+constexpr size_t kAutoAnalyzeTableIdIdx = 0;
+static const char* const kAutoAnalyzeMutations = "mutations_since_last_analyze";
+constexpr size_t kAutoAnalyzeMutationsIdx = 1;
+static const char* const kAutoAnalyzeLastAnalyzeInfo = "last_analyze_info";
+constexpr size_t kAutoAnalyzeLastAnalyzeInfoIdx = 2;
+static const char* const kAutoAnalyzeCurrentAnalyzeInfo = "current_analyze_info";
+constexpr size_t kAutoAnalyzeCurrentAnalyzeInfoIdx = 3;
+
 static const char* const kSystemAuthRolesTableName = "roles";
 static const char* const kSystemAuthRolePermissionsTableName = "role_permissions";
 static const char* const kSystemAuthResourceRolePermissionsIndexTableName =
