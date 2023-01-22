@@ -277,6 +277,7 @@ Status TabletServer::UpdateMasterAddresses(const consensus::RaftConfigPB& new_co
   opts_.SetMasterAddresses(new_master_addresses);
 
   heartbeater_->set_master_addresses(new_master_addresses);
+  table_analyzer_->set_master_addresses(new_master_addresses);
 
   return Status::OK();
 }
@@ -309,6 +310,9 @@ Status TabletServer::Init() {
   if (FLAGS_tserver_enable_metrics_snapshotter) {
     metrics_snapshotter_.reset(new MetricsSnapshotter(opts_, this));
   }
+
+  // TODO(velioglu): Initiate it under flag
+  table_analyzer_.reset(new TableAnalyzer(opts_, this));
 
   std::vector<HostPort> hps;
   for (const auto& master_addr_vector : *opts_.GetMasterAddresses()) {
@@ -463,6 +467,9 @@ Status TabletServer::Start() {
     RETURN_NOT_OK(metrics_snapshotter_->Start());
   }
 
+  // TODO(velioglu): Start in under flag
+  RETURN_NOT_OK(table_analyzer_->Start());
+
   RETURN_NOT_OK(maintenance_manager_->Init());
 
   google::FlushLogFiles(google::INFO); // Flush the startup messages.
@@ -481,6 +488,9 @@ void TabletServer::Shutdown() {
     if (FLAGS_tserver_enable_metrics_snapshotter) {
       WARN_NOT_OK(metrics_snapshotter_->Stop(), "Failed to stop TS Metrics Snapshotter thread");
     }
+
+    WARN_NOT_OK(table_analyzer_->Stop(), "Failed to stop TS Table Analyzer thread");
+
     tablet_manager_->StartShutdown();
     RpcAndWebServerBase::Shutdown();
     tablet_manager_->CompleteShutdown();

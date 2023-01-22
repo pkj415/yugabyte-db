@@ -52,6 +52,7 @@
 #include "yb/tserver/tablet_server_interface.h"
 #include "yb/tserver/tablet_server_options.h"
 #include "yb/tserver/xcluster_safe_time_map.h"
+#include "yb/tserver/table_analyzer.h"
 
 #include "yb/util/locks.h"
 #include "yb/util/net/net_util.h"
@@ -119,6 +120,8 @@ class TabletServer : public DbServerBase, public TabletServerIf {
   Heartbeater* heartbeater() { return heartbeater_.get(); }
 
   MetricsSnapshotter* metrics_snapshotter() { return metrics_snapshotter_.get(); }
+
+  TableAnalyzer* table_analyzer() { return table_analyzer_.get(); }
 
   void set_fail_heartbeats_for_tests(bool fail_heartbeats_for_tests) {
     base::subtle::NoBarrier_Store(&fail_heartbeats_for_tests_, fail_heartbeats_for_tests);
@@ -302,6 +305,9 @@ class TabletServer : public DbServerBase, public TabletServerIf {
 
   // Thread responsible for collecting metrics snapshots for native storage.
   std::unique_ptr<MetricsSnapshotter> metrics_snapshotter_;
+
+  // Thread responsible for collecting table level mutations and updating table statistics
+  std::unique_ptr<TableAnalyzer> table_analyzer_;
 
   // Webserver path handlers
   std::unique_ptr<TabletServerPathHandlers> path_handlers_;

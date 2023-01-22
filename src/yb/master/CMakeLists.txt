@@ -41,6 +41,7 @@ YRPC_GENERATE(
       master_admin.proto master_client.proto master_cluster.proto master_dcl.proto
       master_encryption.proto master_heartbeat.proto master_replication.proto
       master_backup.proto
+      master_mutation_counter.proto
   MESSAGES_PROTO_FILES
       master_ddl.proto
   NO_SERVICE_MESSAGES_PROTO_FILES
@@ -93,6 +94,7 @@ set(MASTER_SRCS
   master_ddl_service.cc
   master_encryption_service.cc
   master_heartbeat_service.cc
+  master_mutation_counter_service.cc
   master_replication_service.cc
   master_options.cc
   master_service_base.cc

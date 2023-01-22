@@ -40,6 +40,7 @@
 #include "yb/tserver/pg_table_cache.h"
 #include "yb/tserver/xcluster_safe_time_map.h"
 #include "yb/tserver/pg_response_cache.h"
+#include "yb/tserver/pg_table_mutation_counter.h"
 
 #include "yb/util/flags.h"
 #include "yb/util/logging.h"
@@ -307,8 +308,11 @@ struct PerformData {
   PgPerformResponsePB* resp;
   rpc::RpcContext context;
   PgClientSessionOperations ops;
+  MutationCounter* mutation_counter;
+  client::YBTransaction* transaction;
   PgTableCache* table_cache;
   PgClientSession::UsedReadTimePtr used_read_time;
+
   PgResponseCache::Setter cache_setter;
 
   void FlushDone(client::FlushStatus* flush_status) {
@@ -342,6 +346,17 @@ struct PerformData {
         }
         VLOG(2) << SessionLogPrefix(session_id) << "Failed op " << idx << ": " << status;
         return status.CloneAndAddErrorCode(OpIndex(idx));
+      }
+      // In case of write operation, increase mutation counter
+      if (op->type() == client::YBOperation::Type::PGSQL_WRITE) {
+        std::string table_id = down_cast<const client::YBPgsqlWriteOp&>(*op).table()->id();
+
+        if (!transaction) {
+          // If there is no transaction, it means we can directly update the TServer level aggregate
+          tablemutationcounter::IncrementTableMutationCount(table_id, 1);
+        }
+
+         mutation_counter->IncreaseTableMutationCount(table_id, 1);
       }
       if (op->response().is_backfill_batch_done() &&
           op->type() == client::YBOperation::Type::PGSQL_READ &&
@@ -631,6 +646,8 @@ Status PgClientSession::RollbackToSubTransaction(
                         kind == PgClientSessionKind::kPlain ? "kPlain" : "kDdl",
                         req.sub_transaction_id()));
 
+  mutation_counter_.ClearSubtxnMutations(req.sub_transaction_id());
+
   return transaction->RollbackToSubTransaction(req.sub_transaction_id(),
                                                context->GetClientDeadline());
 }
@@ -680,8 +697,23 @@ Status PgClientSession::FinishTransaction(
     VLOG_WITH_PREFIX_AND_FUNC(2)
         << "ddl: " << req.ddl_mode() << ", txn: " << txn_value->id()
         << ", commit: " << commit_status;
+
+    // Gather mutated # of rows information for each subtxn of committed transaction.
+    // Then, clear the mutation counters aggregated for it.
+    for (auto& subtxn_mutation_map_pair : mutation_counter_.GetAllMutations()) {
+      for (auto& table_mutation_count_pair : subtxn_mutation_map_pair.second) {
+        tablemutationcounter::IncrementTableMutationCount(table_mutation_count_pair.first,
+                                                          table_mutation_count_pair.second);
+      }
+    }
+
+    mutation_counter_.ClearAllMutationCounters();
+
     return commit_status;
   }
+
+  // Mutation count must be cleared after aborting the transaction without gathering mutations.
+  mutation_counter_.ClearAllMutationCounters();
 
   VLOG_WITH_PREFIX_AND_FUNC(2)
       << "ddl: " << req.ddl_mode() << ", txn: " << txn_value->id() << ", abort";
@@ -704,12 +736,20 @@ Status PgClientSession::Perform(
   auto session_info = VERIFY_RESULT(SetupSession(*req, context->GetClientDeadline()));
   auto* session = session_info.first.session.get();
   auto ops = VERIFY_RESULT(PrepareOperations(req, session, &context->sidecars(), &table_cache_));
+
+  mutation_counter_.SetCurrentSubtxnId(options.active_sub_transaction_id());
+
+  auto kind = options.ddl_mode() ? PgClientSessionKind::kDdl : PgClientSessionKind::kPlain;
+  auto& txn = Transaction(kind);
+
   auto ops_count = ops.size();
   auto data = std::make_shared<PerformData>(PerformData {
     .session_id = id_,
     .resp = resp,
     .context = std::move(*context),
     .ops = std::move(ops),
+    .mutation_counter = &mutation_counter_,
+    .transaction = txn.get(),
     .table_cache = &table_cache_,
     .used_read_time = session_info.second,
     .cache_setter = std::move(setter)
@@ -1226,6 +1266,40 @@ Status PgClientSession::CheckPlainSessionReadTime() {
         << "Update read time from used read time: " << session->read_point()->GetReadTime();
   }
   return Status::OK();
+}
+
+std::map<int, std::map<std::string, int>> MutationCounter::GetAllMutations() {
+  return subtxn_table_mutation_counter_;
+}
+
+void MutationCounter::SetCurrentSubtxnId(int subtxn_id) {
+  current_subtxn_id_ = subtxn_id;
+
+  if (!subtxn_table_mutation_counter_.contains(current_subtxn_id_)) {
+    subtxn_table_mutation_counter_.insert({current_subtxn_id_, std::map<std::string, int>()});
+  }
+}
+
+void MutationCounter::IncreaseTableMutationCount(std::string table_id, int mutation_count) {
+  if (subtxn_table_mutation_counter_[current_subtxn_id_].contains(table_id)) {
+    subtxn_table_mutation_counter_[current_subtxn_id_][table_id] += 1;
+  } else {
+    subtxn_table_mutation_counter_[current_subtxn_id_].insert({table_id, 1});
+  }
+}
+
+void MutationCounter::ClearAllMutationCounters() {
+  for (auto& mutation_counter : subtxn_table_mutation_counter_) {
+    ClearSubtxnMutations(mutation_counter.first);
+  }
+
+  subtxn_table_mutation_counter_.clear();
+}
+
+void MutationCounter::ClearSubtxnMutations(int subtxn_id) {
+  if (subtxn_table_mutation_counter_.contains(subtxn_id)) {
+    subtxn_table_mutation_counter_[subtxn_id].clear();
+  }
 }
 
 }  // namespace tserver

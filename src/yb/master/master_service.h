@@ -45,6 +45,7 @@ std::unique_ptr<rpc::ServiceIf> MakeMasterDclService(Master* master);
 std::unique_ptr<rpc::ServiceIf> MakeMasterDdlService(Master* master);
 std::unique_ptr<rpc::ServiceIf> MakeMasterEncryptionService(Master* master);
 std::unique_ptr<rpc::ServiceIf> MakeMasterHeartbeatService(Master* master);
+std::unique_ptr<rpc::ServiceIf> MakeMasterMutationCounterService(Master* master);
 std::unique_ptr<rpc::ServiceIf> MakeMasterReplicationService(Master* master);
 
 } // namespace master
