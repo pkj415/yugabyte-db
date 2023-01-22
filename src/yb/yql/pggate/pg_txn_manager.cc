@@ -257,7 +257,7 @@ Status PgTxnManager::CalculateIsolation(bool read_only_op,
   // to use at the DocDB layer, and the "deferrable" flag.
   //
   // Effective isolation means that sometimes SERIALIZABLE reads are internally executed as snapshot
-  // isolation reads. This way we don't have to write read intents and we get higher peformance.
+  // isolation reads. This way we don't have to write read intents and we get higher performance.
   // The resulting execution is still serializable: the order of transactions is the order of
   // timestamps, i.e. read timestamps (for read-only transactions executed at snapshot isolation)
   // and commit timestamps of serializable transactions.

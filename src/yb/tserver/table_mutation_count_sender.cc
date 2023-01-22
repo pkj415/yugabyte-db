@@ -159,6 +159,7 @@ TableMutationCountSender::Thread::Thread(const TabletServerOptions& opts, Tablet
 }
 
 Status TableMutationCountSender::Thread::DoSendMutationCounts() {
+  LOG(INFO) << "Piyush - DoSendMutationCounts";
   CHECK(IsCurrentThread());
 
   if (client_ == NULL) {
@@ -176,9 +177,11 @@ Status TableMutationCountSender::Thread::DoSendMutationCounts() {
 
   // Don't send RPC if there is no mutation for any table at all
   if (mutation_counts.size() == 0) {
+    LOG(INFO) << "Piyush - no mutations to send";
     return Status::OK();
   }
 
+  LOG(INFO) << "Piyush - mutations to send = " << ToString(mutation_counts);
   const Status s = client_->IncreaseMutationCounters(&mutation_counts);
   if (!s.ok()) {
     // If cluster-level aggregates are not updated, re-add tserver-level mutations back

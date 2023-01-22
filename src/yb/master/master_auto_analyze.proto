@@ -16,6 +16,7 @@ package yb.master;
 
 option java_package = "org.yb.master";
 
+import "yb/common/wire_protocol.proto";
 import "yb/master/master_types.proto";
 import "yb/rpc/service.proto";
 
@@ -30,6 +31,16 @@ message IncreaseMutationCountersRequestPB {
 
 message IncreaseMutationCountersResponsePB {
     MasterErrorPB error = 1;
+
+    // If errors occurred with particular table mutation increments, then the errors
+    // for those operations will be passed back in 'per_table_errors'.
+    message PerTableErrorPB {
+        // The index of the table in the incoming batch.
+        uint32 table_index = 1;
+        // The error that occurred.
+        AppStatusPB error = 2;
+    }
+    repeated PerTableErrorPB per_table_errors = 2;
 }
 
 service MasterAutoAnalyze {
