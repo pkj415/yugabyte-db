@@ -307,8 +307,9 @@ Status PgTxnManager::RestartTransaction() {
 
 /* This is called at the start of each statement in READ COMMITTED isolation level */
 Status PgTxnManager::ResetTransactionReadPoint() {
-  RSTATUS_DCHECK(!IsDdlMode(), IllegalState,
-                 "READ COMMITTED semantics don't apply to DDL transactions");
+  RSTATUS_DCHECK((GetPgIsolationLevel() == PgIsolationLevel::READ_COMMITTED) && !IsDdlMode(),
+                 IllegalState,
+                 "Read point reset is allowed only for normal READ COMMITTED transactions");
   read_time_manipulation_ = tserver::ReadTimeManipulation::RESET;
   read_time_for_follower_reads_ = HybridTime();
   RETURN_NOT_OK(UpdateReadTimeForFollowerReadsIfRequired());

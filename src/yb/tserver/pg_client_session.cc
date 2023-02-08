@@ -28,6 +28,7 @@
 
 #include "yb/common/ql_type.h"
 #include "yb/common/pgsql_error.h"
+#include "yb/common/transaction.pb.h"
 #include "yb/common/transaction_error.h"
 #include "yb/common/schema.h"
 #include "yb/common/wire_protocol.h"
@@ -71,6 +72,12 @@ TAG_FLAG(ysql_enable_table_mutation_counter, experimental);
 DEFINE_RUNTIME_string(ysql_sequence_cache_method, "connection",
     "Where sequence values are cached for both existing and new sequences. Valid values are "
     "\"connection\" and \"server\"");
+
+DEFINE_NON_RUNTIME_bool(ysql_rc_force_pick_read_time_on_pg_client, false,
+                        "When resetting read time for a statement in Read Commited isolation level,"
+                        " pick read time on the PgClientService instead of allowing the tserver to"
+                        " pick one.");
+TAG_FLAG(ysql_rc_force_pick_read_time_on_pg_client, advanced);
 
 DECLARE_bool(ysql_serializable_isolation_for_ddl_txn);
 DECLARE_bool(ysql_ddl_rollback_enabled);
@@ -214,6 +221,7 @@ Status ProcessUsedReadTime(uint64_t session_id,
     return Status::OK();
   }
 
+  VLOG(3) << SessionLogPrefix(session_id) << "received op used read time: " << op_used_read_time;
   if (op.table()->schema().table_properties().is_ysql_catalog_table()) {
     // Non empty used_read_time field in catalog read operation means this is the very first
     // catalog read operation after catalog read time resetting. read_time for the operation
@@ -237,7 +245,7 @@ Status ProcessUsedReadTime(uint64_t session_id,
       std::lock_guard<simple_spinlock> guard(used_read_time.lock);
       if (PREDICT_FALSE(static_cast<bool>(used_read_time.value))) {
         return STATUS_FORMAT(IllegalState,
-                             "Session read time already set $0 used read time is $1",
+                             "Used read time already set to $0. Received used read time is $1",
                              used_read_time.value,
                              op_used_read_time);
       }
@@ -859,25 +867,35 @@ Status PgClientSession::Perform(
   return Status::OK();
 }
 
-void PgClientSession::ProcessReadTimeManipulation(ReadTimeManipulation manipulation) {
+Status PgClientSession::ProcessReadTimeManipulation(
+    PgClientSessionKind kind, ReadTimeManipulation manipulation) {
+  RSTATUS_DCHECK(
+      kind == PgClientSessionKind::kPlain || manipulation == ReadTimeManipulation::NONE,
+      IllegalState,
+      "Read time manipulation can't be specified for kDdl/ kCatalog/ kSequence transactions");
   switch (manipulation) {
     case ReadTimeManipulation::RESET: {
-        // If a txn_ has been created, session_->read_point() returns the read point stored in txn_.
-        ConsistentReadPoint* rp = Session(PgClientSessionKind::kPlain)->read_point();
-        rp->SetCurrentReadTime();
-
-        VLOG(1) << "Setting current ht as read point " << rp->GetReadTime();
+        if (FLAGS_ysql_rc_force_pick_read_time_on_pg_client) {
+          // If a txn_ has been created, session_->read_point() returns the read point stored in
+          // txn_.
+          ConsistentReadPoint* rp = Session(PgClientSessionKind::kPlain)->read_point();
+          rp->SetCurrentReadTime();
+          VLOG(1) << "Setting current ht as read point " << rp->GetReadTime();
+        } else {
+          Session(PgClientSessionKind::kPlain)->SetReadPoint(ReadHybridTime());
+          VLOG(1) << "Resetting read point";
+        }
       }
-      return;
+      return Status::OK();
     case ReadTimeManipulation::RESTART: {
         ConsistentReadPoint* rp = Session(PgClientSessionKind::kPlain)->read_point();
         rp->Restart();
 
         VLOG(1) << "Restarted read point " << rp->GetReadTime();
       }
-      return;
+      return Status::OK();
     case ReadTimeManipulation::NONE:
-      return;
+      return Status::OK();
     case ReadTimeManipulation::ReadTimeManipulation_INT_MIN_SENTINEL_DO_NOT_USE_:
     case ReadTimeManipulation::ReadTimeManipulation_INT_MAX_SENTINEL_DO_NOT_USE_:
       break;
@@ -940,20 +958,23 @@ PgClientSession::SetupSession(
 
   VLOG_WITH_PREFIX(4) << __func__ << ": " << options.ShortDebugString();
 
+  bool is_rc_read_point_reset = options.read_time_manipulation() == ReadTimeManipulation::RESET;
+
+  if ((kind == PgClientSessionKind::kPlain) &&
+      ((txn_serial_no_ != options.txn_serial_no()) ||
+       (!FLAGS_ysql_rc_force_pick_read_time_on_pg_client && is_rc_read_point_reset))) {
+    // Reset any left over used read time so that it isn't unintentionally picked up later.
+    std::lock_guard<simple_spinlock> guard(plain_session_used_read_time_.lock);
+    plain_session_used_read_time_.value = ReadHybridTime();
+  }
+
   UsedReadTimePtr used_read_time;
   if (options.restart_transaction()) {
-    if(options.ddl_mode()) {
-      return STATUS(NotSupported, "Not supported to restart DDL transaction");
-    }
+    RSTATUS_DCHECK(!options.ddl_mode(), NotSupported, "Restarting a DDL transaction not supported");
     Transaction(kind) = VERIFY_RESULT(RestartTransaction(session, transaction));
     transaction = Transaction(kind).get();
   } else {
-    RSTATUS_DCHECK(
-        kind == PgClientSessionKind::kPlain ||
-        options.read_time_manipulation() == ReadTimeManipulation::NONE,
-        IllegalState,
-        "Read time manipulation can't be specified for kDdl/ kCatalog transactions");
-    ProcessReadTimeManipulation(options.read_time_manipulation());
+    RETURN_NOT_OK(ProcessReadTimeManipulation(kind, options.read_time_manipulation()));
     if (options.has_read_time() || options.use_catalog_session()) {
       const auto read_time = options.has_read_time() && options.read_time().has_read_ht()
           ? ReadHybridTime::FromPB(options.read_time()) : ReadHybridTime();
@@ -963,18 +984,16 @@ PgClientSession::SetupSession(
       } else {
         VLOG_WITH_PREFIX(3) << "Reset read time: " << session->read_point()->GetReadTime();
       }
-    } else if (!transaction &&
-               (options.ddl_mode() || txn_serial_no_ != options.txn_serial_no())) {
+    } else if ((txn_serial_no_ != options.txn_serial_no()) ||
+               (!FLAGS_ysql_rc_force_pick_read_time_on_pg_client && is_rc_read_point_reset)) {
       session->SetReadPoint(ReadHybridTime());
       if (kind == PgClientSessionKind::kPlain) {
         used_read_time = std::weak_ptr<UsedReadTime>(
             std::shared_ptr<UsedReadTime>(shared_from_this(), &plain_session_used_read_time_));
-        std::lock_guard<simple_spinlock>  guard(plain_session_used_read_time_.lock);
-        plain_session_used_read_time_.value = ReadHybridTime();
       }
       VLOG_WITH_PREFIX(3) << "Reset read time: " << session->read_point()->GetReadTime();
     } else {
-      if (!transaction && kind == PgClientSessionKind::kPlain) {
+      if (kind == PgClientSessionKind::kPlain) {
         RETURN_NOT_OK(CheckPlainSessionReadTime());
       }
       VLOG_WITH_PREFIX(3) << "Keep read time: " << session->read_point()->GetReadTime();
@@ -1454,11 +1473,21 @@ Status PgClientSession::CheckPlainSessionReadTime() {
     {
       std::lock_guard<simple_spinlock> guard(plain_session_used_read_time_.lock);
       used_read_time = plain_session_used_read_time_.value;
+      // Reset the used read time, once the session time is set, no future read should require this.
+      plain_session_used_read_time_.value = ReadHybridTime();
     }
     RSTATUS_DCHECK(used_read_time, IllegalState, "Used read time is not set");
+    // TODO(Piyush): Do we set to used_read_time even for serializable isolation level?
     session->SetReadPoint(used_read_time);
     VLOG_WITH_PREFIX(3)
         << "Update read time from used read time: " << session->read_point()->GetReadTime();
+  } else {
+#ifndef NDEBUG
+    std::lock_guard<simple_spinlock> guard(plain_session_used_read_time_.lock);
+    LOG_IF_WITH_PREFIX(DFATAL, plain_session_used_read_time_.value)
+        << "Read time was already set to: " << session->read_point()->GetReadTime()
+        << ", a left over used read time shouldn't exist: " << plain_session_used_read_time_.value;
+#endif
   }
   return Status::OK();
 }

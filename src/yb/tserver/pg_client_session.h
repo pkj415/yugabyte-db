@@ -116,8 +116,7 @@ class PgClientSession : public std::enable_shared_from_this<PgClientSession> {
 
   Result<const TransactionMetadata*> GetDdlTransactionMetadata(
       bool use_transaction, CoarseTimePoint deadline);
-  Status BeginTransactionIfNecessary(
-      const PgPerformOptionsPB& options, CoarseTimePoint deadline);
+  Status BeginTransactionIfNecessary(const PgPerformOptionsPB& options, CoarseTimePoint deadline);
   Result<client::YBTransactionPtr> RestartTransaction(
       client::YBSession* session, client::YBTransaction* transaction);
 
@@ -126,7 +125,7 @@ class PgClientSession : public std::enable_shared_from_this<PgClientSession> {
   Status ProcessResponse(
       const PgClientSessionOperations& operations, const PgPerformRequestPB& req,
       PgPerformResponsePB* resp, rpc::RpcContext* context);
-  void ProcessReadTimeManipulation(ReadTimeManipulation manipulation);
+  Status ProcessReadTimeManipulation(PgClientSessionKind kind, ReadTimeManipulation manipulation);
 
   client::YBClient& client();
   client::YBSessionPtr& EnsureSession(PgClientSessionKind kind);

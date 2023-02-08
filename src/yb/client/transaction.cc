@@ -132,6 +132,7 @@ struct LogPrefixTag {
 
 static_assert(sizeof(LogPrefixTag) == 2 * sizeof(uint64_t));
 
+// TODO: add isolation level to prefix.
 struct TaggedLogPrefix {
   std::string prefix;
   boost::atomic<LogPrefixTag> tag;
@@ -414,6 +415,12 @@ class YBTransaction::Impl final : public internal::TxnBatcherIf {
       // snapshot.
       // For snapshot isolation, if read time was not yet picked, we have to choose it now, if
       // there multiple tablets that will process first request.
+      //
+      // TODO: For READ COMMITTED isolation, we want to avoid setting a read time if there is only
+      // one tablet and this is the first rpc in a new statement. This is because we want to allow
+      // the transaction participant to pick a new read time and reply with the used read time. If a
+      // read time is picked here, the transaction participant has to wait for safe time to advance
+      // to this value.
       SetReadTimeIfNeeded(ops_info->groups.size() > 1 || force_consistent_read);
     }
 
@@ -434,13 +441,10 @@ class YBTransaction::Impl final : public internal::TxnBatcherIf {
     running_requests_ += count;
   }
 
-  void Flushed(
-      const internal::InFlightOps& ops, const ReadHybridTime& used_read_time,
-      const Status& status) EXCLUDES(mutex_) override {
+  void Flushed(const internal::InFlightOps& ops, const Status& status) EXCLUDES(mutex_) override {
     TRACE_TO(trace_, "Flushed $0 ops. with Status $1", ops.size(), status.ToString());
     VLOG_WITH_PREFIX(5)
-        << "Flushed: " << yb::ToString(ops) << ", used_read_time: " << used_read_time
-        << ", status: " << status;
+        << "Flushed: " << yb::ToString(ops) << ", status: " << status;
     if (FLAGS_TEST_transaction_inject_flushed_delay_ms > 0) {
       std::this_thread::sleep_for(FLAGS_TEST_transaction_inject_flushed_delay_ms * 1ms);
     }
@@ -454,23 +458,6 @@ class YBTransaction::Impl final : public internal::TxnBatcherIf {
       running_requests_ -= ops.size();
 
       if (status.ok()) {
-        if (used_read_time && metadata_.isolation == IsolationLevel::SNAPSHOT_ISOLATION) {
-          const bool read_point_already_set = static_cast<bool>(read_point_.GetReadTime());
-#ifndef NDEBUG
-          if (read_point_already_set) {
-            // Display details of operations before crashing in debug mode.
-            int op_idx = 1;
-            for (const auto& op : ops) {
-              LOG(ERROR) << "Operation " << op_idx << ": " << op.ToString();
-              op_idx++;
-            }
-          }
-#endif
-          LOG_IF_WITH_PREFIX(DFATAL, read_point_already_set)
-              << "Read time already picked (" << read_point_.GetReadTime()
-              << ", but server replied with used read time: " << used_read_time;
-          read_point_.SetReadTime(used_read_time, ConsistentReadPoint::HybridTimeMap());
-        }
         const std::string* prev_tablet_id = nullptr;
         for (const auto& op : ops) {
           if (op.yb_op->applied() && op.yb_op->should_add_intents(metadata_.isolation)) {

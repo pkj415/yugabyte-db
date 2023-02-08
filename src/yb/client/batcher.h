@@ -86,9 +86,7 @@ class TxnBatcherIf {
   virtual void ExpectOperations(size_t count) = 0;
 
   // Notifies transaction that specified ops were flushed with some status.
-  virtual void Flushed(
-      const internal::InFlightOps& ops, const ReadHybridTime& used_read_time,
-      const Status& status) = 0;
+  virtual void Flushed(const internal::InFlightOps& ops, const Status& status) = 0;
 
   // This function is used to init metadata of Write/Read request.
   // If we don't have enough information, then the function returns false and stores

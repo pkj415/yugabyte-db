@@ -664,7 +664,7 @@ void Batcher::Flushed(
       // See comments for YBTransaction::Impl::running_requests_ and
       // YBSession::AddErrorsAndRunCallback.
       // https://github.com/yugabyte/yugabyte-db/issues/7984.
-      transaction->batcher_if().Flushed(ops, flush_extra_result.used_read_time, status);
+      transaction->batcher_if().Flushed(ops, status);
     }
   }
   if (status.ok() && read_point_) {
