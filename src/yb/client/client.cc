@@ -176,6 +176,7 @@ using yb::master::GetUDTypeMetadataResponsePB;
 using yb::master::GrantRevokePermissionResponsePB;
 using yb::master::GrantRevokePermissionRequestPB;
 using yb::master::MasterDdlProxy;
+using yb::master::IncreaseMutationCountersRequestPB;
 using yb::master::ReplicationInfoPB;
 using yb::master::TabletLocationsPB;
 using yb::master::RedisConfigSetRequestPB;
@@ -1588,6 +1589,23 @@ Status YBClient::UpdateConsumerOnProducerMetadata(
   req.mutable_producer_change_metadata_request()->CopyFrom(meta_info);
 
   CALL_SYNC_LEADER_MASTER_RPC_EX(Replication, req, (*resp), UpdateConsumerOnProducerMetadata);
+  return Status::OK();
+}
+
+Status YBClient::IncreaseMutationCounters(
+  const std::unordered_map<TableId, std::atomic<uint64>>* table_mutation_counts) {
+
+  master::IncreaseMutationCountersRequestPB req;
+  for (auto& table_id_count_pair : *table_mutation_counts) {
+    master::TablIdMutationCountPairPB *cur_pair = req.add_table_mutation_counts();
+    cur_pair->set_table_id(table_id_count_pair.first);
+    cur_pair->set_mutation_count(table_id_count_pair.second);
+  }
+
+  master::IncreaseMutationCountersResponsePB resp;
+  CALL_SYNC_LEADER_MASTER_RPC_EX(AutoAnalyze, req, resp, IncreaseMutationCounters);
+
+  // TODO: Check response and act accordingly
   return Status::OK();
 }
 

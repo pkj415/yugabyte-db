@@ -98,6 +98,14 @@ class ClientMasterRpcBase : public rpc::Rpc {
     return master_replication_proxy();
   }
 
+  std::shared_ptr<master::MasterAutoAnalyzeProxy> master_auto_analyze_proxy() {
+    return client_data_->master_auto_analyze_proxy();
+  }
+
+  auto master_proxy_helper(const master::MasterAutoAnalyzeProxy*) {
+    return master_auto_analyze_proxy();
+  }
+
   virtual void CallRemoteMethod() = 0;
 
   virtual void ProcessResponse(const Status& status) = 0;

@@ -66,6 +66,7 @@
 #include "yb/gutil/sysinfo.h"
 
 #include "yb/master/master_admin.proxy.h"
+#include "yb/master/master_auto_analyze.proxy.h"
 #include "yb/master/master_client.proxy.h"
 #include "yb/master/master_cluster.proxy.h"
 #include "yb/master/master_dcl.proxy.h"
@@ -257,6 +258,7 @@ YB_CLIENT_SPECIALIZE_SIMPLE(ValidateReplicationInfo);
 YB_CLIENT_SPECIALIZE_SIMPLE(CheckIfPitrActive);
 YB_CLIENT_SPECIALIZE_SIMPLE_EX(Admin, CreateTransactionStatusTable);
 YB_CLIENT_SPECIALIZE_SIMPLE_EX(Admin, AddTransactionStatusTablet);
+YB_CLIENT_SPECIALIZE_SIMPLE_EX(AutoAnalyze, IncreaseMutationCounters);
 YB_CLIENT_SPECIALIZE_SIMPLE_EX(Client, GetTableLocations);
 YB_CLIENT_SPECIALIZE_SIMPLE_EX(Client, GetTabletLocations);
 YB_CLIENT_SPECIALIZE_SIMPLE_EX(Client, GetTransactionStatusTablets);
@@ -2115,6 +2117,8 @@ void YBClient::Data::LeaderMasterDetermined(const Status& status,
           proxy_cache_.get(), host_port);
       master_replication_proxy_ = std::make_shared<master::MasterReplicationProxy>(
           proxy_cache_.get(), host_port);
+      master_auto_analyze_proxy_ = std::make_shared<master::MasterAutoAnalyzeProxy>(
+          proxy_cache_.get(), host_port);
     }
 
     rpcs_.Unregister(&leader_master_rpc_);
@@ -2458,6 +2462,11 @@ shared_ptr<master::MasterDdlProxy> YBClient::Data::master_ddl_proxy() const {
 shared_ptr<master::MasterReplicationProxy> YBClient::Data::master_replication_proxy() const {
   std::lock_guard<simple_spinlock> l(leader_master_lock_);
   return master_replication_proxy_;
+}
+
+shared_ptr<master::MasterAutoAnalyzeProxy> YBClient::Data::master_auto_analyze_proxy() const {
+  std::lock_guard<simple_spinlock> l(leader_master_lock_);
+  return master_auto_analyze_proxy_;
 }
 
 uint64_t YBClient::Data::GetLatestObservedHybridTime() const {

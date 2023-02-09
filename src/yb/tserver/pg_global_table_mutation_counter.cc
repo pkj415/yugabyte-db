@@ -29,24 +29,36 @@
 // or implied.  See the License for the specific language governing permissions and limitations
 // under the License.
 //
-#pragma once
 
-#include "yb/master/master_fwd.h"
+#include "yb/util/shared_lock.h"
 
-#include "yb/rpc/rpc_fwd.h"
+#include "yb/tserver/pg_global_table_mutation_counter.h"
+#include "yb/common/entity_ids.h"
 
 namespace yb {
-namespace master {
+namespace tserver {
 
-std::unique_ptr<rpc::ServiceIf> MakeMasterAdminService(Master* master);
-std::unique_ptr<rpc::ServiceIf> MakeMasterClientService(Master* master);
-std::unique_ptr<rpc::ServiceIf> MakeMasterClusterService(Master* master);
-std::unique_ptr<rpc::ServiceIf> MakeMasterDclService(Master* master);
-std::unique_ptr<rpc::ServiceIf> MakeMasterDdlService(Master* master);
-std::unique_ptr<rpc::ServiceIf> MakeMasterEncryptionService(Master* master);
-std::unique_ptr<rpc::ServiceIf> MakeMasterHeartbeatService(Master* master);
-std::unique_ptr<rpc::ServiceIf> MakeMasterAutoAnalyzeService(Master* master);
-std::unique_ptr<rpc::ServiceIf> MakeMasterReplicationService(Master* master);
+  void GlobalTableMutationCounter::Increase(TableId table_id, uint64 mutation_count) {
+    {
+      SharedLock shared_lock(mutex_);
+      if (table_mutation_counts_.contains(table_id)) {
+        table_mutation_counts_[table_id] += mutation_count;
+        return;
+      }
+    }
 
-} // namespace master
-} // namespace yb
+    std::lock_guard lock(mutex_);
+    if (table_mutation_counts_.contains(table_id)) {
+      table_mutation_counts_[table_id] += mutation_count;
+    } else {
+      table_mutation_counts_[table_id] = mutation_count;
+    }
+}
+
+  std::unordered_map<TableId, std::atomic<uint64>> GlobalTableMutationCounter::GetAndClear() {
+    std::lock_guard lock(mutex_);
+    return std::move(table_mutation_counts_);
+  }
+
+}  // namespace tserver
+}  // namespace yb

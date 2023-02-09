@@ -58,6 +58,7 @@
 #include "yb/gutil/macros.h"
 #include "yb/gutil/port.h"
 
+#include "yb/master/master_auto_analyze.proxy.h"
 #include "yb/master/master_fwd.h"
 #include "yb/master/master_client.fwd.h"
 #include "yb/master/master_ddl.fwd.h"
@@ -557,6 +558,9 @@ class YBClient {
                                           const TableId& table_id,
                                           const tablet::ChangeMetadataRequestPB& meta_info,
                                           master::UpdateConsumerOnProducerMetadataResponsePB *resp);
+
+  Status IncreaseMutationCounters(
+    const std::unordered_map<TableId, std::atomic<uint64>>* table_mutation_counts);
 
   void GetTableLocations(
       const TableId& table_id, int32_t max_tablets, RequireTabletsRunning require_tablets_running,

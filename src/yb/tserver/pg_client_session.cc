@@ -40,6 +40,7 @@
 #include "yb/tserver/pg_table_cache.h"
 #include "yb/tserver/xcluster_safe_time_map.h"
 #include "yb/tserver/pg_response_cache.h"
+#include "yb/tserver/pg_global_table_mutation_counter.h"
 
 #include "yb/util/flags.h"
 #include "yb/util/logging.h"
@@ -307,6 +308,9 @@ struct PerformData {
   PgPerformResponsePB* resp;
   rpc::RpcContext context;
   PgClientSessionOperations ops;
+  TransactionTableMutationCounter* transaction_table_mutation_counter;
+  GlobalTableMutationCounter* global_table_mutation_counter;
+  bool in_distributed_transaction;
   PgTableCache* table_cache;
   PgClientSession::UsedReadTimePtr used_read_time;
   PgResponseCache::Setter cache_setter;
@@ -342,6 +346,18 @@ struct PerformData {
         }
         VLOG(2) << SessionLogPrefix(session_id) << "Failed op " << idx << ": " << status;
         return status.CloneAndAddErrorCode(OpIndex(idx));
+      }
+      // In case of write operation, increase mutation counter
+      if (op->type() == client::YBOperation::Type::PGSQL_WRITE) {
+        TableId table_id = down_cast<const client::YBPgsqlWriteOp&>(*op).table()->id();
+
+        // If there is no distributed transaction, it means we can directly update the TServer
+        // level aggregate. Otherwise increase the transaction level aggregate
+        if (!in_distributed_transaction) {
+          global_table_mutation_counter->Increase(table_id, 1);
+        } else {
+          transaction_table_mutation_counter->Increase(table_id, 1);
+        }
       }
       if (op->response().is_backfill_batch_done() &&
           op->type() == client::YBOperation::Type::PGSQL_READ &&
@@ -379,13 +395,14 @@ PgClientSession::PgClientSession(
     uint64_t id, client::YBClient* client, const scoped_refptr<ClockBase>& clock,
     std::reference_wrapper<const TransactionPoolProvider> transaction_pool_provider,
     PgTableCache* table_cache, const XClusterSafeTimeMap* xcluster_safe_time_map,
-    PgResponseCache* response_cache)
+    GlobalTableMutationCounter* global_table_mutation_counter, PgResponseCache* response_cache)
     : id_(id),
       client_(*client),
       clock_(clock),
       transaction_pool_provider_(transaction_pool_provider.get()),
       table_cache_(*table_cache),
       xcluster_safe_time_map_(xcluster_safe_time_map),
+      global_table_mutation_counter_(global_table_mutation_counter),
       response_cache_(*response_cache) {}
 
 uint64_t PgClientSession::id() const {
@@ -631,6 +648,8 @@ Status PgClientSession::RollbackToSubTransaction(
                         kind == PgClientSessionKind::kPlain ? "kPlain" : "kDdl",
                         req.sub_transaction_id()));
 
+  transaction_table_mutation_counter_.ClearSubtxn(req.sub_transaction_id());
+
   return transaction->RollbackToSubTransaction(req.sub_transaction_id(),
                                                context->GetClientDeadline());
 }
@@ -680,8 +699,25 @@ Status PgClientSession::FinishTransaction(
     VLOG_WITH_PREFIX_AND_FUNC(2)
         << "ddl: " << req.ddl_mode() << ", txn: " << txn_value->id()
         << ", commit: " << commit_status;
+
+    // Gather mutated # of rows information for each subtxn of committed transaction.
+    // Then, clear the mutation counters aggregated for it in any case.
+    if (commit_status.ok()) {
+      for (auto& subtxn_mutation_map_pair : transaction_table_mutation_counter_.Get()) {
+        for (auto& table_mutation_count_pair : subtxn_mutation_map_pair.second) {
+          global_table_mutation_counter_->Increase(table_mutation_count_pair.first,
+                                                   table_mutation_count_pair.second);
+        }
+      }
+    }
+
+    transaction_table_mutation_counter_.Clear();
+
     return commit_status;
   }
+
+  // Mutation count must be cleared even if aborting the transaction without gathering mutations.
+  transaction_table_mutation_counter_.Clear();
 
   VLOG_WITH_PREFIX_AND_FUNC(2)
       << "ddl: " << req.ddl_mode() << ", txn: " << txn_value->id() << ", abort";
@@ -704,18 +740,27 @@ Status PgClientSession::Perform(
   auto session_info = VERIFY_RESULT(SetupSession(*req, context->GetClientDeadline()));
   auto* session = session_info.first.session.get();
   auto ops = VERIFY_RESULT(PrepareOperations(req, session, &context->sidecars(), &table_cache_));
+
+  transaction_table_mutation_counter_.SetCurrentSubtxnId(options.active_sub_transaction_id());
+
+  auto transaction = session_info.first.transaction;
+  bool in_distributed_transaction = transaction.get() != NULL;
+
   auto ops_count = ops.size();
   auto data = std::make_shared<PerformData>(PerformData {
     .session_id = id_,
     .resp = resp,
     .context = std::move(*context),
     .ops = std::move(ops),
+    .transaction_table_mutation_counter = &transaction_table_mutation_counter_,
+    .global_table_mutation_counter = global_table_mutation_counter_,
+    .in_distributed_transaction = in_distributed_transaction,
     .table_cache = &table_cache_,
     .used_read_time = session_info.second,
     .cache_setter = std::move(setter)
   });
 
-  auto transaction = session_info.first.transaction;
+
   session->FlushAsync([this, data, transaction, ops_count](client::FlushStatus* flush_status) {
     data->FlushDone(flush_status);
     if (transaction) {
@@ -1226,6 +1271,36 @@ Status PgClientSession::CheckPlainSessionReadTime() {
         << "Update read time from used read time: " << session->read_point()->GetReadTime();
   }
   return Status::OK();
+}
+
+const std::map<SubTransactionId, std::map<TableId, uint64>>
+  & TransactionTableMutationCounter::Get() {
+  return subtxn_table_mutation_counter_map_;
+}
+
+void TransactionTableMutationCounter::SetCurrentSubtxnId(SubTransactionId subtxn_id) {
+  current_subtxn_id_ = subtxn_id;
+
+  if (!subtxn_table_mutation_counter_map_.contains(current_subtxn_id_)) {
+    subtxn_table_mutation_counter_map_.insert({current_subtxn_id_, std::map<TableId, uint64>()});
+  }
+}
+
+void TransactionTableMutationCounter::Increase(TableId table_id, uint64 mutation_count) {
+  if (subtxn_table_mutation_counter_map_[current_subtxn_id_].contains(table_id)) {
+    subtxn_table_mutation_counter_map_[current_subtxn_id_][table_id] += mutation_count;
+  } else {
+    subtxn_table_mutation_counter_map_[current_subtxn_id_].insert({table_id, mutation_count});
+  }
+}
+
+void TransactionTableMutationCounter::Clear() {
+  subtxn_table_mutation_counter_map_.clear();
+  current_subtxn_id_ = -1;
+}
+
+void TransactionTableMutationCounter::ClearSubtxn(SubTransactionId subtxn_id) {
+  subtxn_table_mutation_counter_map_.erase(subtxn_id);
 }
 
 }  // namespace tserver

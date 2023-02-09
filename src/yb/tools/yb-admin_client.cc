@@ -569,6 +569,9 @@ void ClusterAdminClient::ResetMasterProxy(const HostPort& leader_addr) {
 
   master_replication_proxy_ = std::make_unique<master::MasterReplicationProxy>(
       proxy_cache_.get(), leader_addr_);
+
+  master_auto_analyze_proxy_ = std::make_unique<master::MasterAutoAnalyzeProxy>(
+      proxy_cache_.get(), leader_addr_);
 }
 
 Status ClusterAdminClient::MasterLeaderStepDown(

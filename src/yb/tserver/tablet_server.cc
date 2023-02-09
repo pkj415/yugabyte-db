@@ -75,6 +75,7 @@
 #include "yb/tserver/pg_client_service.h"
 #include "yb/tserver/remote_bootstrap_service.h"
 #include "yb/tserver/tablet_service.h"
+#include "yb/tserver/table_mutation_count_sender.h"
 #include "yb/tserver/ts_tablet_manager.h"
 #include "yb/tserver/tserver-path-handlers.h"
 #include "yb/tserver/tserver_service.proxy.h"
@@ -277,6 +278,7 @@ Status TabletServer::UpdateMasterAddresses(const consensus::RaftConfigPB& new_co
   opts_.SetMasterAddresses(new_master_addresses);
 
   heartbeater_->set_master_addresses(new_master_addresses);
+  table_mutation_count_sender_->set_master_addresses(new_master_addresses);
 
   return Status::OK();
 }
@@ -309,6 +311,9 @@ Status TabletServer::Init() {
   if (FLAGS_tserver_enable_metrics_snapshotter) {
     metrics_snapshotter_.reset(new MetricsSnapshotter(opts_, this));
   }
+
+  // TODO(velioglu): Initiate it under flag
+  table_mutation_count_sender_.reset(new TableMutationCountSender(opts_, this));
 
   std::vector<HostPort> hps;
   for (const auto& master_addr_vector : *opts_.GetMasterAddresses()) {
@@ -438,7 +443,7 @@ Status TabletServer::RegisterServices() {
   auto pg_client_service = std::make_shared<PgClientServiceImpl>(
       *this, tablet_manager_->client_future(), clock(),
       std::bind(&TabletServer::TransactionPool, this), metric_entity(),
-      &messenger()->scheduler(), &xcluster_safe_time_map_);
+      &messenger()->scheduler(), &xcluster_safe_time_map_, &global_table_mutation_counter_);
   pg_client_service_ = pg_client_service;
   LOG(INFO) << "yb::tserver::PgClientServiceImpl created at " << pg_client_service.get();
   RETURN_NOT_OK(RpcAndWebServerBase::RegisterService(
@@ -463,6 +468,9 @@ Status TabletServer::Start() {
     RETURN_NOT_OK(metrics_snapshotter_->Start());
   }
 
+  // TODO(velioglu): Start in under flag
+  RETURN_NOT_OK(table_mutation_count_sender_->Start());
+
   RETURN_NOT_OK(maintenance_manager_->Init());
 
   google::FlushLogFiles(google::INFO); // Flush the startup messages.
@@ -481,6 +489,11 @@ void TabletServer::Shutdown() {
     if (FLAGS_tserver_enable_metrics_snapshotter) {
       WARN_NOT_OK(metrics_snapshotter_->Stop(), "Failed to stop TS Metrics Snapshotter thread");
     }
+
+    // TODO(velioglu): Stop it under flag
+    WARN_NOT_OK(
+      table_mutation_count_sender_->Stop(), "Failed to stop table mutation count sender thread");
+
     tablet_manager_->StartShutdown();
     RpcAndWebServerBase::Shutdown();
     tablet_manager_->CompleteShutdown();
@@ -797,6 +810,10 @@ void TabletServer::SetPublisher(rpc::Publisher service) {
 
 const XClusterSafeTimeMap& TabletServer::GetXClusterSafeTimeMap() const {
   return xcluster_safe_time_map_;
+}
+
+GlobalTableMutationCounter& TabletServer::GetGlobalTableMutationCounter() {
+  return global_table_mutation_counter_;
 }
 
 void TabletServer::UpdateXClusterSafeTime(const XClusterNamespaceToSafeTimePBMap& safe_time_map) {

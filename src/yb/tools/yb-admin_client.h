@@ -400,6 +400,7 @@ class ClusterAdminClient {
   std::unique_ptr<master::MasterDdlProxy> master_ddl_proxy_;
   std::unique_ptr<master::MasterEncryptionProxy> master_encryption_proxy_;
   std::unique_ptr<master::MasterReplicationProxy> master_replication_proxy_;
+  std::unique_ptr<master::MasterAutoAnalyzeProxy> master_auto_analyze_proxy_;
 
   // Skip yb_client_ and related fields' initialization.
   std::unique_ptr<client::YBClient> yb_client_;
