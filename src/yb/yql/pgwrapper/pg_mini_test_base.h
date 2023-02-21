@@ -48,6 +48,10 @@ class PgMiniTestBase : public MiniClusterTestWithClient<MiniCluster> {
     return 3;
   }
 
+  virtual std::vector<uint16_t> NodeClockSkewsMs() const {
+    return std::vector<uint16_t>();
+  }
+
   // This allows changing mini cluster options before the mini cluster is started.
   virtual void OverrideMiniClusterOptions(MiniClusterOptions* options);
 
@@ -82,7 +86,7 @@ class PgMiniTestBase : public MiniClusterTestWithClient<MiniCluster> {
   Result<master::CatalogManagerIf*> catalog_manager() const;
 
  private:
-  Result<PgProcessConf> CreatePgProcessConf(uint16_t port);
+  Result<std::pair<PgProcessConf, size_t>> CreatePgProcessConf(uint16_t port);
 
   std::unique_ptr<PgSupervisor> pg_supervisor_;
   HostPort pg_host_port_;

@@ -201,8 +201,9 @@ Status PgDocResult::ProcessSparseSystemColumns(std::string *reservoir) {
 
 //--------------------------------------------------------------------------------------------------
 
-PgDocResponse::PgDocResponse(PerformFuture future, uint64_t in_txn_limit)
-    : holder_(PerformInfo{.future = std::move(future), .in_txn_limit = in_txn_limit}) {}
+PgDocResponse::PgDocResponse(PerformFuture future, uint64_t in_txn_limit_for_reads_num)
+    : holder_(PerformInfo{
+        .future = std::move(future), .in_txn_limit_for_reads_num = in_txn_limit_for_reads_num}) {}
 
 PgDocResponse::PgDocResponse(ProviderPtr provider)
     : holder_(std::move(provider)) {}
@@ -216,7 +217,7 @@ bool PgDocResponse::Valid() const {
 Result<PgDocResponse::Data> PgDocResponse::Get(MonoDelta* wait_time) {
   if (std::holds_alternative<PerformInfo>(holder_)) {
     auto& info = std::get<PerformInfo>(holder_);
-    return Data(VERIFY_RESULT(info.future.Get(wait_time)), info.in_txn_limit);
+    return Data(VERIFY_RESULT(info.future.Get(wait_time)), info.in_txn_limit_for_reads_num);
   }
   // Detach provider pointer after first usage to make PgDocResponse::Valid return false.
   ProviderPtr provider;
@@ -312,9 +313,10 @@ Status PgDocOp::SendRequestImpl(ForceNonBufferable force_non_bufferable) {
   // Send at most "parallelism_level_" number of requests at one time.
   size_t send_count = std::min(parallelism_level_, active_op_count_);
   VLOG(1) << "Number of operations to send: " << send_count;
+
   response_ = VERIFY_RESULT(sender_(
       pg_session_.get(), pgsql_ops_.data(), send_count,
-      *table_, GetInTxnLimit(), force_non_bufferable));
+      *table_, GetInTxnLimitForReadsNum(), force_non_bufferable));
   return Status::OK();
 }
 
@@ -338,7 +340,9 @@ Result<std::list<PgDocResult>> PgDocOp::ProcessResponseImpl(
   }
   const auto& data = *response;
   auto result = VERIFY_RESULT(ProcessCallResponse(*data.response));
-  GetInTxnLimit() = data.in_txn_limit;
+  GetInTxnLimitForReadsNum() = data.in_txn_limit_for_reads_num;
+  VLOG(2) << "Using resp, set statement/PgDocOp level in_txn_limit_for_reads_num = "
+          << data.in_txn_limit_for_reads_num;
   RETURN_NOT_OK(CompleteProcessResponse());
   return result;
 }
@@ -395,9 +399,9 @@ Result<std::list<PgDocResult>> PgDocOp::ProcessCallResponse(const rpc::CallRespo
   return result;
 }
 
-uint64_t& PgDocOp::GetInTxnLimit() {
-  return exec_params_.statement_in_txn_limit ? *exec_params_.statement_in_txn_limit
-                                             : in_txn_limit_;
+uint64_t& PgDocOp::GetInTxnLimitForReadsNum() {
+  return exec_params_.stmt_in_txn_limit_for_reads_num ?
+      *exec_params_.stmt_in_txn_limit_for_reads_num : in_txn_limit_for_reads_num_;
 }
 
 Status PgDocOp::CreateRequests() {
@@ -424,10 +428,10 @@ Status PgDocOp::CompleteRequests() {
 
 Result<PgDocResponse> PgDocOp::DefaultSender(
     PgSession* session, const PgsqlOpPtr* ops, size_t ops_count, const PgTableDesc& table,
-    uint64_t in_txn_limit, ForceNonBufferable force_non_bufferable) {
+    uint64_t in_txn_limit_for_reads_num, ForceNonBufferable force_non_bufferable) {
   auto result = VERIFY_RESULT(session->RunAsync(
-      ops, ops_count, table, &in_txn_limit, force_non_bufferable));
-  return PgDocResponse(std::move(result), in_txn_limit);
+      ops, ops_count, table, &in_txn_limit_for_reads_num, force_non_bufferable));
+  return PgDocResponse(std::move(result), in_txn_limit_for_reads_num);
 }
 
 //-------------------------------------------------------------------------------------------------

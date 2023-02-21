@@ -213,11 +213,10 @@ class PgDocResult {
 class PgDocResponse {
  public:
   struct Data {
-    Data(const rpc::CallResponsePtr& response_, uint64_t in_txn_limit_)
-        : response(response_), in_txn_limit(in_txn_limit_) {
-    }
+    Data(const rpc::CallResponsePtr& response_, uint64_t in_txn_limit_for_reads_num_)
+        : response(response_), in_txn_limit_for_reads_num(in_txn_limit_for_reads_num_) {}
     rpc::CallResponsePtr response;
-    uint64_t in_txn_limit;
+    uint64_t in_txn_limit_for_reads_num;
   };
 
   class Provider {
@@ -229,7 +228,7 @@ class PgDocResponse {
   using ProviderPtr = std::unique_ptr<Provider>;
 
   PgDocResponse() = default;
-  PgDocResponse(PerformFuture future, uint64_t in_txn_limit);
+  PgDocResponse(PerformFuture future, uint64_t in_txn_limit_for_reads_num);
   explicit PgDocResponse(ProviderPtr provider);
 
   bool Valid() const;
@@ -238,7 +237,7 @@ class PgDocResponse {
  private:
   struct PerformInfo {
     PerformFuture future;
-    uint64_t in_txn_limit;
+    uint64_t in_txn_limit_for_reads_num;
   };
   std::variant<PerformInfo, ProviderPtr> holder_;
 };
@@ -331,7 +330,21 @@ class PgDocOp : public std::enable_shared_from_this<PgDocOp> {
     const PgSession::ScopedRefPtr& pg_session, PgTable* table,
     const Sender& = Sender(&PgDocOp::DefaultSender));
 
-  uint64_t& GetInTxnLimit();
+  // Returns a reference to an integer that indicates if the in txn limit has been set for read ops.
+  // If it is zero, the in txn limit for read ops is picked once by PgClientService on the local
+  // tserver process and this integer is set to the next global in_txn_limit_for_reads_num (global
+  // for this backend, see PgTxnManager::in_txn_limit_for_reads_counter_). Thereafter, all read ops
+  // will use the already chosen in txn limit.
+  //
+  // Usually one in txn limit is chosen for all for read ops of a SQL statement. And the integer
+  // in such a situation references the statement level integer that is passed down to all PgDocOp
+  // instances via PgExecParameters.
+  //
+  // In case the reference to the statement level integer isn't passed in PgExecParameters, a local
+  // integer is used which is 0 at the start of the PgDocOp.
+  //
+  // See ReadHybridTimePB for more details about in_txn_limit.
+  uint64_t& GetInTxnLimitForReadsNum();
 
   // Populate Protobuf requests using the collected information for this DocDB operator.
   virtual Result<bool> DoCreateRequests() = 0;
@@ -346,17 +359,14 @@ class PgDocOp : public std::enable_shared_from_this<PgDocOp> {
   // Session control.
   PgSession::ScopedRefPtr pg_session_;
 
-  // This time is set at the start (i.e., before sending the first batch of PgsqlOp ops) and must
-  // stay the same for the lifetime of the PgDocOp.
+  // See yb_es_in_txn_limit_for_reads_num in struct EState for details about this integer.
   //
-  // Each query must only see data written by earlier queries in the same transaction, not data
-  // written by itself. Setting it at the start ensures that future operations of the PgDocOp only
-  // see data written by previous queries.
-  //
-  // NOTE: Each query might result in many PgDocOps. So using 1 in_txn_limit_ per PgDocOp is not
-  // enough. The same should be used across all PgDocOps in the query. This is ensured by the use
-  // of statement_in_txn_limit in yb_exec_params of EState.
-  uint64_t in_txn_limit_ = 0;
+  // Usually, a pointer to the statement level equivalent of this integer is passed via
+  // PgExecParameters to all PgDocOp instances invoked by the SQL statement. However, in situations
+  // where a statement level equivalent doesn't exist (i.e., a nullptr is passed), the below integer
+  // is used for ensuring the same guarantees as described for yb_es_in_txn_limit_for_reads_num, but
+  // at a per PgDocOp level instead of the statement level.
+  uint64_t in_txn_limit_for_reads_num_ = 0;
 
   // Target table.
   PgTable& table_;
@@ -457,7 +467,7 @@ class PgDocOp : public std::enable_shared_from_this<PgDocOp> {
 
   static Result<PgDocResponse> DefaultSender(
       PgSession* session, const PgsqlOpPtr* ops, size_t ops_count, const PgTableDesc& table,
-      uint64_t in_txn_limit, ForceNonBufferable force_non_bufferable);
+      uint64_t in_txn_limit_for_reads_num, ForceNonBufferable force_non_bufferable);
 
   // Result set either from selected or returned targets is cached in a list of strings.
   // Querying state variables.

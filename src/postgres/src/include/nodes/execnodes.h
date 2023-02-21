@@ -598,12 +598,22 @@ typedef struct EState
 	YBCPgExecParameters yb_exec_params;
 
 	/*
-	 *  The in txn limit used for this query. This value is initialized
-	 *  to 0, and later updated by the first read operation initiated for this
-	 *  query. All later read operations are then ensured that they will never
-	 *  read any data written past this time.
+	 * An integer which helps identify if the in txn limit for read operations is already picked for
+	 * the current SQL statement (see requirement 1 in src/yb/yql/pggate/README). This integer is
+	 * passed down to all PgDocOp instances invoked by this statement. The first read operation by the
+	 * statement finds that this integer is 0 and hence does 2 items:
+	 *
+	 * 1) initializes the in txn limit for read operations
+	 * 2) sets this integer to the next global in_txn_limit_for_reads_num (global for this backend,
+	 *    see PgTxnManager::in_txn_limit_for_reads_counter_). This ensure that all future operations
+	 *    see this to be non-zero and hence don't change the picked in txn limit for reads.
+	 *
+	 * So, all read operations in the statement use the txn limit picked on the first read op of the
+	 * statement. This is slightly incorrect and causes a bug as explained in requirement 1 of
+	 * src/yb/yql/pggate/README. But apart from that corner case, this ensures that read operations of
+	 * a SQL statement don't read any value written by the same statement.
 	 */
-	uint64_t yb_es_in_txn_limit_ht;
+	uint64_t yb_es_in_txn_limit_for_reads_num;
 } EState;
 
 /*

@@ -85,6 +85,12 @@ class PgClientSession : public std::enable_shared_from_this<PgClientSession> {
   struct SessionData {
     client::YBSessionPtr session;
     client::YBTransactionPtr transaction;
+    // in_txn_limit_for_reads is applicable only for sessions of type PgClientSessionKind::kPlain.
+    // It is used to ensure that every new client level statement in YSQL uses one in_txn_limit for
+    // all ops of type PgsqlReadRequestPB in that statement.
+    //
+    // Refer ReadHybridTimePB for details on in_txn_limit.
+    HybridTime in_txn_limit_for_reads;
   };
 
   using UsedReadTimePtr = std::weak_ptr<UsedReadTime>;
@@ -119,7 +125,7 @@ class PgClientSession : public std::enable_shared_from_this<PgClientSession> {
       client::YBSession* session, client::YBTransaction* transaction);
 
   Result<std::pair<SessionData, PgClientSession::UsedReadTimePtr>> SetupSession(
-      const PgPerformRequestPB& req, CoarseTimePoint deadline);
+      const PgPerformRequestPB& req, CoarseTimePoint deadline, bool has_reads, bool has_writes);
   Status ProcessResponse(
       const PgClientSessionOperations& operations, const PgPerformRequestPB& req,
       PgPerformResponsePB* resp, rpc::RpcContext* context);
@@ -169,6 +175,7 @@ class PgClientSession : public std::enable_shared_from_this<PgClientSession> {
 
   std::array<SessionData, kPgClientSessionKindMapSize> sessions_;
   uint64_t txn_serial_no_ = 0;
+  uint64_t in_txn_limit_for_reads_num_ = 0;
   boost::optional<uint64_t> saved_priority_;
   TransactionMetadata ddl_txn_metadata_;
   UsedReadTime plain_session_used_read_time_;

@@ -248,13 +248,14 @@ class PgSession : public RefCountedThreadSafe<PgSession> {
   }
 
   Result<PerformFuture> RunAsync(
-      const OperationGenerator& generator, uint64_t* in_txn_limit,
+      const OperationGenerator& generator, uint64_t* in_txn_limit_for_reads_num,
       ForceNonBufferable force_non_bufferable = ForceNonBufferable::kFalse);
   Result<PerformFuture> RunAsync(
-      const ReadOperationGenerator& generator, uint64_t* in_txn_limit,
+      const ReadOperationGenerator& generator, uint64_t* in_txn_limit_for_reads_num,
       ForceNonBufferable force_non_bufferable = ForceNonBufferable::kFalse);
   Result<PerformFuture> RunAsyncCacheable(
-      const ReadOperationGenerator& generator, uint64_t* in_txn_limit, std::string&& cache_key);
+      const ReadOperationGenerator& generator, uint64_t* in_txn_limit_for_reads_num,
+      std::string&& cache_key);
 
   // Smart driver functions.
   // -------------
@@ -362,7 +363,7 @@ class PgSession : public RefCountedThreadSafe<PgSession> {
 
   template<class Generator>
   Result<PerformFuture> DoRunAsync(
-      const Generator& generator, uint64_t* in_txn_limit,
+      const Generator& generator, uint64_t* in_txn_limit_for_reads_num,
       ForceNonBufferable force_non_bufferable, std::string&& cache_key);
 
   struct TxnSerialNoPerformInfo {

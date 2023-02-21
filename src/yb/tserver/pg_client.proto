@@ -387,6 +387,12 @@ enum ReadTimeManipulation {
   RESTART = 2;
 }
 
+// TODO: Remove the OptionalUint64PB helper message after updating protobuf generator
+//       to allow 'optional' in proto3
+message OptionalUint64PB {
+  uint64 value = 1;
+}
+
 message PgPerformOptionsPB {
   message CachingInfo {
     bytes key = 1;
@@ -397,7 +403,25 @@ message PgPerformOptionsPB {
   uint32 isolation = 2;
   bool ddl_mode = 3;
   uint64 txn_serial_no = 4;
-  fixed64 in_txn_limit_ht = 5;
+
+  // This counter is similar to txn_serial_no and helps indicate when to pick a new in txn limit
+  // for read ops of a SQL statement. If this value in higher than the existing
+  // in_txn_limit_for_reads_num associated with the corresponding PgClientSession, pick a new in txn
+  // limit and update the existing in_txn_limit_for_reads_num to this value.
+  //
+  // YSQL maintains a backend level global counter (PgTxnManager::in_txn_limit_for_reads_counter_)
+  // and sets in_txn_limit_for_reads_num to the next available number on the first batch of ops sent
+  // by a new SQL statement. Post that, all PgsqlReadRequestPB ops should use that same
+  // in_txn_limit_for_reads_num until a new statemnt starts. This helps achieve requirement 1 in
+  // src/yb/yql/pggate/README)
+  //
+  // For ops of type PgsqlWriteRequestPB, a new in_txn_limit is picked for every new batch of these
+  // ops.
+  //
+  // See src/yb/yql/pggate/README for more information. Also see yb_es_in_txn_limit_for_reads_num in
+  // struct EState.
+  OptionalUint64PB in_txn_limit_for_reads_num = 5;
+
   bool use_existing_priority = 6;
   fixed64 priority = 7;
   bool restart_transaction = 8;

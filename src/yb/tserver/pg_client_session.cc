@@ -731,6 +731,7 @@ Status PgClientSession::FinishTransaction(
 
 Status PgClientSession::Perform(
     PgPerformRequestPB* req, PgPerformResponsePB* resp, rpc::RpcContext* context) {
+  VLOG_WITH_PREFIX(5) << "Perform req=" << req->ShortDebugString();
   PgResponseCache::Setter setter;
   auto& options = *req->mutable_options();
   if (options.has_caching_info()) {
@@ -741,7 +742,18 @@ Status PgClientSession::Perform(
     }
   }
 
-  auto session_info = VERIFY_RESULT(SetupSession(*req, context->GetClientDeadline()));
+  bool has_reads = false;
+  bool has_writes = false;
+  for (auto& op : *req->mutable_ops()) {
+    if (op.has_read()) {
+      has_reads = true;
+    } else {
+      has_writes = true;
+    }
+  }
+
+  auto session_info = VERIFY_RESULT(SetupSession(
+      *req, context->GetClientDeadline(), has_reads, has_writes));
   auto* session = session_info.first.session.get();
   auto ops = VERIFY_RESULT(PrepareOperations(req, session, &context->sidecars(), &table_cache_));
   auto ops_count = ops.size();
@@ -830,7 +842,8 @@ Status PgClientSession::UpdateReadPointForXClusterConsistentReads(
 }
 
 Result<std::pair<PgClientSession::SessionData, PgClientSession::UsedReadTimePtr>>
-PgClientSession::SetupSession(const PgPerformRequestPB& req, CoarseTimePoint deadline) {
+PgClientSession::SetupSession(
+    const PgPerformRequestPB& req, CoarseTimePoint deadline, bool has_reads, bool has_writes) {
   const auto& options = req.options();
   PgClientSessionKind kind;
   if (options.use_catalog_session()) {
@@ -903,11 +916,58 @@ PgClientSession::SetupSession(const PgPerformRequestPB& req, CoarseTimePoint dea
 
   if (!options.ddl_mode() && !options.use_catalog_session()) {
     txn_serial_no_ = options.txn_serial_no();
+  }
 
-    const auto in_txn_limit = HybridTime::FromPB(options.in_txn_limit_ht());
-    if (in_txn_limit) {
-      VLOG_WITH_PREFIX(3) << "In txn limit: " << in_txn_limit;
+  if (kind == PgClientSessionKind::kPlain && transaction != nullptr) {
+    // 1) We set in_txn_limit only if we are in a transaction.
+    // 2) See requirements in src/yb/yql/pggate/README to understand how in_txn_limit is set for
+    //    reads and writes.
+    //
+    // TODO: Shouldn't the below logic for DDL transactions as well?
+    auto& in_txn_limit_for_reads = sessions_[to_underlying(kind)].in_txn_limit_for_reads;
+    bool in_txn_limit_for_reads_was_reset_now = false;
+    if (options.has_in_txn_limit_for_reads_num()) {
+      auto received_in_txn_limit_for_reads_num = options.in_txn_limit_for_reads_num().value();
+      VLOG_WITH_PREFIX(2) << "Received in_txn_limit_for_reads_num="
+                          << received_in_txn_limit_for_reads_num
+                          << ", existing in_txn_limit_for_reads_num="
+                          << in_txn_limit_for_reads_num_;
+      RSTATUS_DCHECK(
+            received_in_txn_limit_for_reads_num >= in_txn_limit_for_reads_num_,
+            IllegalState,
+            "It should never occur that YSQL sends a lower in_txn_limit_for_reads_num after a "
+            "higher in_txn_limit_for_reads_num");
+
+      if (received_in_txn_limit_for_reads_num > in_txn_limit_for_reads_num_) {
+        in_txn_limit_for_reads = clock_->Now();
+        in_txn_limit_for_reads_was_reset_now = true;
+        VLOG_WITH_PREFIX(2) << "Resetting in txn limit for read ops to: "
+                            << in_txn_limit_for_reads;
+        in_txn_limit_for_reads_num_ = received_in_txn_limit_for_reads_num;
+      }
+    }
+
+    if (has_writes && !has_reads) {
+      auto in_txn_limit = clock_->Now();
       session->SetInTxnLimit(in_txn_limit);
+      VLOG_WITH_PREFIX(3) << "Using current hybrid time as in txn limit for write ops: "
+                          << in_txn_limit;
+    } else if (has_reads && !has_writes) {
+      session->SetInTxnLimit(in_txn_limit_for_reads);
+      VLOG_WITH_PREFIX(3) << "Using statement level in_txn_limit_for_reads as in txn limit for "
+                          << "read ops: " << in_txn_limit_for_reads;
+    } else if (has_reads && has_writes) {
+      // Ops of type PgsqlReadRequestPB and PgsqlWriteRequestPB can only be batched if the
+      // in_txn_limit for the read ops wasn't already picked, in which case both use the current
+      // hybrid time.
+      RSTATUS_DCHECK(
+          in_txn_limit_for_reads_was_reset_now,
+          InvalidArgument,
+          "Ops of type PgsqlReadRequestPB and PgsqlWriteRequestPB are batched together but they "
+          "require different in_txn_limit.");
+      session->SetInTxnLimit(in_txn_limit_for_reads);
+      VLOG_WITH_PREFIX(3) << "Using the same in txn limit for write ops batched with the read ops: "
+                          << in_txn_limit_for_reads;
     }
   }
 
@@ -958,6 +1018,7 @@ Status PgClientSession::BeginTransactionIfNecessary(
         : Status::OK();
   }
 
+  VLOG_WITH_PREFIX(2) << "Initiating a distributed transaction";
   txn = transaction_pool_provider_().Take(
       client::ForceGlobalTransaction(options.force_global_transaction()), deadline);
   txn->SetLogPrefixTag(kTxnLogPrefixTag, id_);

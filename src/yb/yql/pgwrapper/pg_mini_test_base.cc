@@ -26,6 +26,8 @@
 #include "yb/util/metrics.h"
 #include "yb/util/tsan_util.h"
 
+#include "yb/server/skewed_clock.h"
+
 DECLARE_bool(enable_ysql);
 DECLARE_bool(hide_pg_catalog_table_creation_logs);
 DECLARE_bool(master_auto_run_initdb);
@@ -64,7 +66,8 @@ void PgMiniTestBase::SetUp() {
       .num_masters = NumMasters(),
       .num_tablet_servers = NumTabletServers(),
       .num_drives = 1,
-      .master_env = env_.get()
+      .master_env = env_.get(),
+      .node_clock_skews_ms = NodeClockSkewsMs()
   };
   OverrideMiniClusterOptions(&mini_cluster_opt);
   cluster_ = std::make_unique<MiniCluster>(mini_cluster_opt);
@@ -73,7 +76,7 @@ void PgMiniTestBase::SetUp() {
   ASSERT_OK(WaitForInitDb(cluster_.get()));
 
   auto port = cluster_->AllocateFreePort();
-  auto pg_process_conf = ASSERT_RESULT(CreatePgProcessConf(port));
+  auto [pg_process_conf, tserver_idx] = ASSERT_RESULT(CreatePgProcessConf(port));
   FLAGS_pgsql_proxy_webserver_port = cluster_->AllocateFreePort();
 
   LOG(INFO) << "Starting PostgreSQL server listening on "
@@ -83,6 +86,10 @@ void PgMiniTestBase::SetUp() {
 
   BeforePgProcessStart();
   pg_supervisor_ = std::make_unique<PgSupervisor>(pg_process_conf, nullptr /* tserver */);
+  auto node_clock_skews_ms = NodeClockSkewsMs();
+  auto guard = node_clock_skews_ms.size() > tserver_idx ?
+        std::optional<server::SkewedTimeSourceGuard>(node_clock_skews_ms[tserver_idx]) :
+        std::nullopt;
   ASSERT_OK(pg_supervisor_->Start());
 
   DontVerifyClusterBeforeNextTearDown();
@@ -106,8 +113,11 @@ Result<master::CatalogManagerIf*> PgMiniTestBase::catalog_manager() const {
   return &CHECK_NOTNULL(VERIFY_RESULT(cluster_->GetLeaderMiniMaster()))->catalog_manager();
 }
 
-Result<PgProcessConf> PgMiniTestBase::CreatePgProcessConf(uint16_t port) {
-  auto pg_ts = RandomElement(cluster_->mini_tablet_servers());
+Result<std::pair<PgProcessConf, size_t>> PgMiniTestBase::CreatePgProcessConf(uint16_t port) {
+  auto idx = RandomUniformInt<size_t>(0, cluster_->mini_tablet_servers().size() - 1);
+  LOG(INFO) << "Picked tserver node " << idx << " for starting Pg";
+
+  auto pg_ts = cluster_->mini_tablet_servers()[idx];
   PgProcessConf pg_process_conf = VERIFY_RESULT(PgProcessConf::CreateValidateAndRunInitDb(
       AsString(Endpoint(pg_ts->bound_rpc_addr().address(), port)),
       pg_ts->options()->fs_opts.data_paths.front() + "/pg_data",
@@ -117,15 +127,22 @@ Result<PgProcessConf> PgMiniTestBase::CreatePgProcessConf(uint16_t port) {
   pg_process_conf.force_disable_log_file = true;
   pg_host_port_ = HostPort(pg_process_conf.listen_addresses, pg_process_conf.pg_port);
 
-  return pg_process_conf;
+  return std::make_pair(pg_process_conf, idx);
 }
 
 Status PgMiniTestBase::RestartCluster() {
   pg_supervisor_->Stop();
+  auto node_clock_skews_ms = NodeClockSkewsMs();
   RETURN_NOT_OK(cluster_->RestartSync());
-  pg_supervisor_ = std::make_unique<PgSupervisor>(
-      VERIFY_RESULT(CreatePgProcessConf(pg_host_port_.port())), nullptr /* tserver */);
-  return pg_supervisor_->Start();
+  auto [pg_process_conf, tserver_idx] = VERIFY_RESULT(CreatePgProcessConf(pg_host_port_.port()));
+  pg_supervisor_ = std::make_unique<PgSupervisor>(pg_process_conf, nullptr /* tserver */);
+
+  auto guard = node_clock_skews_ms.size() > tserver_idx ?
+        std::optional<server::SkewedTimeSourceGuard>(node_clock_skews_ms[tserver_idx]) :
+        std::nullopt;
+
+  RETURN_NOT_OK(pg_supervisor_->Start());
+  return Status::OK();
 }
 
 void PgMiniTestBase::OverrideMiniClusterOptions(MiniClusterOptions* options) {}

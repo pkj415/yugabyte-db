@@ -51,9 +51,17 @@ class PgTxnManager : public RefCountedThreadSafe<PgTxnManager> {
   virtual ~PgTxnManager();
 
   Status BeginTransaction();
-  Status CalculateIsolation(bool read_only_op,
-                            TxnPriorityRequirement txn_priority_requirement,
-                            uint64_t* in_txn_limit = nullptr);
+
+  // If a valid pointer to in_txn_limit_for_reads_num is sent and it is 0, it will set
+  // in_txn_limit_for_reads_num_ to the next available in_txn_limit_for_reads_counter_. This
+  // causes PgClientService to pick a new in txn limit for read operations. The same in txn limit
+  // will be used till in_txn_limit_for_reads_num_ is updated further.
+  //
+  // The pointed to in_txn_limit_for_reads_num is also set to the newly picked
+  // in_txn_limit_for_reads_num_.
+  Status CalculateIsolation(
+      bool read_only_op, TxnPriorityRequirement txn_priority_requirement,
+      uint64_t* in_txn_limit_for_reads_num = nullptr);
   Status RecreateTransaction();
   Status RestartTransaction();
   Status ResetTransactionReadPoint();
@@ -78,6 +86,7 @@ class PgTxnManager : public RefCountedThreadSafe<PgTxnManager> {
 
   double GetTransactionPriority() const;
   TxnPriorityRequirement GetTransactionPriorityType() const;
+  uint64_t IncAndGetInTxnLimitForReadsCounter();
 
  private:
   YB_STRONGLY_TYPED_BOOL(NeedsHigherPriorityTxn);
@@ -122,7 +131,8 @@ class PgTxnManager : public RefCountedThreadSafe<PgTxnManager> {
   // and cancels the other transaction.
   uint64_t priority_ = 0;
   SavePriority use_saved_priority_ = SavePriority::kFalse;
-  HybridTime in_txn_limit_;
+  uint64_t in_txn_limit_for_reads_counter_ = 0;
+  uint64_t in_txn_limit_for_reads_num_ = 0;
 
   PgCallbacks pg_callbacks_;
 

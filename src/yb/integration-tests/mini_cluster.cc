@@ -193,7 +193,8 @@ MiniCluster::~MiniCluster() {
   Shutdown();
 }
 
-Status MiniCluster::Start(const std::vector<tserver::TabletServerOptions>& extra_tserver_options) {
+Status MiniCluster::Start(
+    const std::vector<tserver::TabletServerOptions>& extra_tserver_options) {
   CHECK(!fs_root_.empty()) << "No Fs root was provided";
   CHECK(!running_);
 
@@ -244,6 +245,9 @@ Status MiniCluster::Start(const std::vector<tserver::TabletServerOptions>& extra
   }
 
   for (size_t i = 0; i < options_.num_tablet_servers; i++) {
+    auto guard = options_.node_clock_skews_ms.size() > i ?
+        std::optional<server::SkewedTimeSourceGuard>(options_.node_clock_skews_ms[i]) :
+        std::nullopt;
     if (!extra_tserver_options.empty()) {
       RETURN_NOT_OK_PREPEND(AddTabletServer(extra_tserver_options[i]),
                             Substitute("Error adding TS $0", i));
@@ -251,7 +255,6 @@ Status MiniCluster::Start(const std::vector<tserver::TabletServerOptions>& extra
       RETURN_NOT_OK_PREPEND(AddTabletServer(),
                             Substitute("Error adding TS $0", i));
     }
-
   }
 
   RETURN_NOT_OK_PREPEND(WaitForTabletServerCount(options_.num_tablet_servers),
@@ -284,10 +287,14 @@ Status MiniCluster::StartMasters() {
   });
 
   for (size_t i = 0; i < options_.num_masters; i++) {
+    auto guard = options_.node_clock_skews_ms.size() > i ?
+        std::optional<server::SkewedTimeSourceGuard>(options_.node_clock_skews_ms[i]) :
+        std::nullopt;
     mini_masters_[i] = std::make_shared<MiniMaster>(
         options_.master_env, GetMasterFsRoot(i), master_rpc_ports_[i], master_web_ports_[i], i);
     auto status = mini_masters_[i]->StartDistributedMaster(master_rpc_ports_);
     LOG_IF(INFO, !status.ok()) << "Failed to start master: " << status;
+
     RETURN_NOT_OK_PREPEND(status, Substitute("Couldn't start follower $0", i));
     VLOG(1) << "Started MiniMaster with UUID " << mini_masters_[i]->permanent_uuid()
             << " at index " << i;
@@ -319,17 +326,23 @@ Status MiniCluster::RestartSync() {
   LOG(INFO) << string(80, '-');
 
   LOG(INFO) << "Restart tablet server(s)...";
-  for (auto& tablet_server : mini_tablet_servers_) {
-    CHECK_OK(tablet_server->Restart());
-    CHECK_OK(tablet_server->WaitStarted());
+  for (size_t i = 0; i < mini_tablet_servers_.size(); ++i) {
+    auto guard = options_.node_clock_skews_ms.size() > i ?
+        std::optional<server::SkewedTimeSourceGuard>(options_.node_clock_skews_ms[i]) :
+        std::nullopt;
+    CHECK_OK(mini_tablet_servers_[i]->Restart());
+    CHECK_OK(mini_tablet_servers_[i]->WaitStarted());
   }
   LOG(INFO) << "Restart master server(s)...";
-  for (auto& master_server : mini_masters_) {
-    LOG(INFO) << "Restarting master " << master_server->permanent_uuid();
+  for (size_t i = 0; i < mini_masters_.size(); ++i) {
+    auto guard = options_.node_clock_skews_ms.size() > i ?
+        std::optional<server::SkewedTimeSourceGuard>(options_.node_clock_skews_ms[i]) :
+        std::nullopt;
+    LOG(INFO) << "Restarting master " << mini_masters_[i]->permanent_uuid();
     LongOperationTracker long_operation_tracker("Master restart", 5s);
-    CHECK_OK(master_server->Restart());
-    LOG(INFO) << "Waiting for catalog manager at " << master_server->permanent_uuid();
-    CHECK_OK(master_server->WaitForCatalogManagerInit());
+    CHECK_OK(mini_masters_[i]->Restart());
+    LOG(INFO) << "Waiting for catalog manager at " << mini_masters_[i]->permanent_uuid();
+    CHECK_OK(mini_masters_[i]->WaitForCatalogManagerInit());
   }
   LOG(INFO) << string(80, '-');
   LOG(INFO) << __FUNCTION__ << " done";
