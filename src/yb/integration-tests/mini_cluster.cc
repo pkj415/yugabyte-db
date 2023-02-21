@@ -109,6 +109,7 @@ DECLARE_int64(rocksdb_compact_flush_rate_limit_bytes_per_sec);
 DECLARE_string(use_private_ip);
 DECLARE_int32(load_balancer_initial_delay_secs);
 DECLARE_int32(transaction_table_num_tablets);
+DECLARE_string(time_source);
 
 namespace yb {
 
@@ -193,7 +194,9 @@ MiniCluster::~MiniCluster() {
   Shutdown();
 }
 
-Status MiniCluster::Start(const std::vector<tserver::TabletServerOptions>& extra_tserver_options) {
+Status MiniCluster::Start(
+    const std::vector<tserver::TabletServerOptions>& extra_tserver_options,
+    const std::vector<uint16_t>& tserver_clock_skew_ms) {
   CHECK(!fs_root_.empty()) << "No Fs root was provided";
   CHECK(!running_);
 
@@ -244,6 +247,10 @@ Status MiniCluster::Start(const std::vector<tserver::TabletServerOptions>& extra
   }
 
   for (size_t i = 0; i < options_.num_tablet_servers; i++) {
+    if (tserver_clock_skew_ms.size() > i) {
+      FLAGS_time_source = "skewed,-" + std::to_string(tserver_clock_skew_ms[i]);
+    }
+
     if (!extra_tserver_options.empty()) {
       RETURN_NOT_OK_PREPEND(AddTabletServer(extra_tserver_options[i]),
                             Substitute("Error adding TS $0", i));
@@ -252,6 +259,9 @@ Status MiniCluster::Start(const std::vector<tserver::TabletServerOptions>& extra
                             Substitute("Error adding TS $0", i));
     }
 
+    if (tserver_clock_skew_ms.size() > i) {
+      FLAGS_time_source = "";
+    }
   }
 
   RETURN_NOT_OK_PREPEND(WaitForTabletServerCount(options_.num_tablet_servers),

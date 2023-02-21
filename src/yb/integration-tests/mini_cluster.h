@@ -119,7 +119,9 @@ class MiniCluster : public MiniClusterBase {
   // All servers run on the loopback interface with ephemeral ports.
   Status Start(
       const std::vector<tserver::TabletServerOptions>& extra_tserver_options =
-      std::vector<tserver::TabletServerOptions>());
+      std::vector<tserver::TabletServerOptions>(),
+      const std::vector<uint16_t>& tserver_clock_skew_ms =
+      std::vector<uint16_t>());
 
   // Like the previous method but performs initialization synchronously, i.e.
   // this will wait for all TS's to be started and initialized. Tests should

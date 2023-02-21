@@ -41,6 +41,7 @@
 #include "yb/docdb/primitive_value.h"
 #include "yb/docdb/value_type.h"
 
+#include "yb/server/skewed_clock.h"
 #include "yb/yql/pggate/pg_expr.h"
 #include "yb/yql/pggate/pg_gate_fwd.h"
 #include "yb/yql/pggate/pg_memctx.h"
@@ -87,6 +88,10 @@ TAG_FLAG(ysql_enable_profile, hidden);
 DEFINE_NON_RUNTIME_bool(ysql_catalog_preload_additional_tables, false,
             "If true, YB catalog preloads additional tables upon "
             "connection creation and cache refresh.");
+
+DEFINE_test_flag(bool, allow_skewed_clock_in_ysql, false,
+                 "If true, allows use of a skewed clock to simulate fake clock skew "
+                 "in all HybridClock instances used by this process.");
 
 namespace yb {
 namespace pggate {
@@ -176,6 +181,12 @@ void YBCInitPgGateEx(const YBCPgTypeEntity *data_type_table, int count, PgCallba
 extern "C" {
 
 void YBCInitPgGate(const YBCPgTypeEntity *data_type_table, int count, PgCallbacks pg_callbacks) {
+  if (FLAGS_TEST_allow_skewed_clock_in_ysql) {
+    // TODO: We should get rid of hybrid clock usage on YSQL (see #16034). However, this is added to
+    // allow simulating and testing of some known bugs until we remove HybridClock usage.
+    server::SkewedClock::Register();
+  }
+
   YBCInitPgGateEx(data_type_table, count, pg_callbacks, nullptr);
 }
 

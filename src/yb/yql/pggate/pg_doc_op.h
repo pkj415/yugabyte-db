@@ -213,11 +213,8 @@ class PgDocResult {
 class PgDocResponse {
  public:
   struct Data {
-    Data(const rpc::CallResponsePtr& response_, uint64_t in_txn_limit_)
-        : response(response_), in_txn_limit(in_txn_limit_) {
-    }
+    explicit Data(const rpc::CallResponsePtr& response_) : response(response_) {}
     rpc::CallResponsePtr response;
-    uint64_t in_txn_limit;
   };
 
   class Provider {
@@ -229,7 +226,7 @@ class PgDocResponse {
   using ProviderPtr = std::unique_ptr<Provider>;
 
   PgDocResponse() = default;
-  PgDocResponse(PerformFuture future, uint64_t in_txn_limit);
+  explicit PgDocResponse(PerformFuture future);
   explicit PgDocResponse(ProviderPtr provider);
 
   bool Valid() const;
@@ -238,7 +235,6 @@ class PgDocResponse {
  private:
   struct PerformInfo {
     PerformFuture future;
-    uint64_t in_txn_limit;
   };
   std::variant<PerformInfo, ProviderPtr> holder_;
 };
@@ -248,7 +244,7 @@ class PgDocOp : public std::enable_shared_from_this<PgDocOp> {
   using SharedPtr = std::shared_ptr<PgDocOp>;
 
   using Sender = std::function<Result<PgDocResponse>(
-      PgSession*, const PgsqlOpPtr*, size_t, const PgTableDesc&, uint64_t, ForceNonBufferable)>;
+      PgSession*, const PgsqlOpPtr*, size_t, const PgTableDesc&, bool*, ForceNonBufferable)>;
 
   struct OperationRowOrder {
     OperationRowOrder(const PgsqlOpPtr& operation_, int64_t order_)
@@ -331,7 +327,7 @@ class PgDocOp : public std::enable_shared_from_this<PgDocOp> {
     const PgSession::ScopedRefPtr& pg_session, PgTable* table,
     const Sender& = Sender(&PgDocOp::DefaultSender));
 
-  uint64_t& GetInTxnLimit();
+  bool* GetInTxnLimitForReadsAlreadySet();
 
   // Populate Protobuf requests using the collected information for this DocDB operator.
   virtual Result<bool> DoCreateRequests() = 0;
@@ -346,17 +342,23 @@ class PgDocOp : public std::enable_shared_from_this<PgDocOp> {
   // Session control.
   PgSession::ScopedRefPtr pg_session_;
 
-  // This time is set at the start (i.e., before sending the first batch of PgsqlOp ops) and must
-  // stay the same for the lifetime of the PgDocOp.
+  // Helps identify if the in txn limit for read operations is already picked for this PgDocOp.
+  // It is false initially and set to true when the first batch of PgsqlOp read ops are being sent
+  // to the local tserver proxy (since that will set the in_txn_limit for reads).
   //
-  // Each query must only see data written by earlier queries in the same transaction, not data
-  // written by itself. Setting it at the start ensures that future operations of the PgDocOp only
-  // see data written by previous queries.
+  // Thereafter, the in_txn_limit must stay the same for all reads ops in the lifetime of this
+  // PgDocOp.
+  //
+  // It helps ensure that each query sees only data written by earlier queries in the same
+  // transaction, not data written by itself. Setting it at the start ensures that future read
+  // operations of the PgDocOp only see data written by previous queries.
   //
   // NOTE: Each query might result in many PgDocOps. So using 1 in_txn_limit_ per PgDocOp is not
   // enough. The same should be used across all PgDocOps in the query. This is ensured by the use
-  // of statement_in_txn_limit in yb_exec_params of EState.
-  uint64_t in_txn_limit_ = 0;
+  // of stmt_in_txn_limit_for_reads_already_set in yb_exec_params of EState.
+  //
+  // See src/yb/yql/pggate/README.txt for more details.
+  bool in_txn_limit_for_reads_already_set_ = false;
 
   // Target table.
   PgTable& table_;
@@ -457,7 +459,7 @@ class PgDocOp : public std::enable_shared_from_this<PgDocOp> {
 
   static Result<PgDocResponse> DefaultSender(
       PgSession* session, const PgsqlOpPtr* ops, size_t ops_count, const PgTableDesc& table,
-      uint64_t in_txn_limit, ForceNonBufferable force_non_bufferable);
+      bool* in_txn_limit_for_reads_already_set, ForceNonBufferable force_non_bufferable);
 
   // Result set either from selected or returned targets is cached in a list of strings.
   // Querying state variables.

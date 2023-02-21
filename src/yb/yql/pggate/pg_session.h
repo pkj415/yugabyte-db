@@ -248,13 +248,14 @@ class PgSession : public RefCountedThreadSafe<PgSession> {
   }
 
   Result<PerformFuture> RunAsync(
-      const OperationGenerator& generator, uint64_t* in_txn_limit,
+      const OperationGenerator& generator, bool* in_txn_limit_for_reads_already_set,
       ForceNonBufferable force_non_bufferable = ForceNonBufferable::kFalse);
   Result<PerformFuture> RunAsync(
-      const ReadOperationGenerator& generator, uint64_t* in_txn_limit,
+      const ReadOperationGenerator& generator, bool* in_txn_limit_for_reads_already_set,
       ForceNonBufferable force_non_bufferable = ForceNonBufferable::kFalse);
   Result<PerformFuture> RunAsyncCacheable(
-      const ReadOperationGenerator& generator, uint64_t* in_txn_limit, std::string&& cache_key);
+      const ReadOperationGenerator& generator, bool* in_txn_limit_for_reads_already_set,
+      std::string&& cache_key);
 
   // Smart driver functions.
   // -------------
@@ -341,6 +342,12 @@ class PgSession : public RefCountedThreadSafe<PgSession> {
 
   void GetAndResetOperationFlushRpcStats(uint64_t* count, uint64_t* wait_time);
 
+  void ResetInTxnLimitForReadOps();
+
+  void ResetInTxnLimitForReadOpsOnce() {
+    reset_in_txn_limit_for_read_ops_once_ = true;
+  }
+
  private:
   Result<PgTableDescPtr> DoLoadTable(const PgObjectId& table_id, bool fail_on_cache_hit);
   Result<PerformFuture> FlushOperations(BufferableOperations ops, bool transactional);
@@ -362,7 +369,7 @@ class PgSession : public RefCountedThreadSafe<PgSession> {
 
   template<class Generator>
   Result<PerformFuture> DoRunAsync(
-      const Generator& generator, uint64_t* in_txn_limit,
+      const Generator& generator, bool* in_txn_limit_for_reads_already_set,
       ForceNonBufferable force_non_bufferable, std::string&& cache_key);
 
   struct TxnSerialNoPerformInfo {
@@ -407,6 +414,7 @@ class PgSession : public RefCountedThreadSafe<PgSession> {
   const YBCPgCallbacks& pg_callbacks_;
   bool has_write_ops_in_ddl_mode_ = false;
   std::variant<TxnSerialNoPerformInfo> last_perform_on_txn_serial_no_;
+  bool reset_in_txn_limit_for_read_ops_once_ = false;
 };
 
 }  // namespace pggate

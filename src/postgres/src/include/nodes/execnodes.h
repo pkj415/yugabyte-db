@@ -598,12 +598,18 @@ typedef struct EState
 	YBCPgExecParameters yb_exec_params;
 
 	/*
-	 *  The in txn limit used for this query. This value is initialized
-	 *  to 0, and later updated by the first read operation initiated for this
-	 *  query. All later read operations are then ensured that they will never
-	 *  read any data written past this time.
+	 * Helps identify if the in txn limit for read operations is already picked for the current SQL
+	 * query. This value is initialized to false, and later updated to true by the first read
+	 * operation initiated for this query since the in txn limit would have been picked then. All
+	 * later read operations are then ensured that they will never read any data written by the
+	 * current query.
+	 *
+	 * TODO: Each query can have multiple "EState"s. Fix logic for such cases. Ensure that only one
+	 * in_txn_limit is used for reads in one statement.
+	 *
+	 * See ReadHybridTimePB for details about in_txn_limit.
 	 */
-	uint64_t yb_es_in_txn_limit_ht;
+	bool yb_es_in_txn_limit_for_reads_already_set;
 } EState;
 
 /*

@@ -26,6 +26,7 @@
 #include "yb/client/transaction_pool.h"
 #include "yb/client/yb_op.h"
 
+#include "yb/common/hybrid_time.h"
 #include "yb/common/ql_type.h"
 #include "yb/common/pgsql_error.h"
 #include "yb/common/transaction_error.h"
@@ -279,7 +280,7 @@ Status GetTable(const TableId& table_id, PgTableCache* cache, client::YBTablePtr
 
 Result<PgClientSessionOperations> PrepareOperations(
     PgPerformRequestPB* req, client::YBSession* session, rpc::Sidecars* sidecars,
-    PgTableCache* table_cache) {
+    PgTableCache* table_cache, bool *has_writes, bool *has_reads) {
   auto write_time = HybridTime::FromPB(req->write_time());
   std::vector<std::shared_ptr<client::YBPgsqlOp>> ops;
   ops.reserve(req->ops().size());
@@ -293,6 +294,7 @@ Result<PgClientSessionOperations> PrepareOperations(
   const auto read_from_followers = req->options().read_from_followers();
   for (auto& op : *req->mutable_ops()) {
     if (op.has_read()) {
+      *has_reads = true;
       auto& read = *op.mutable_read();
       RETURN_NOT_OK(GetTable(read.table_id(), table_cache, &table));
       auto read_op = std::make_shared<client::YBPgsqlReadOp>(table, sidecars, &read);
@@ -302,6 +304,7 @@ Result<PgClientSessionOperations> PrepareOperations(
       ops.push_back(read_op);
       session->Apply(std::move(read_op));
     } else {
+      *has_writes = true;
       auto& write = *op.mutable_write();
       RETURN_NOT_OK(GetTable(write.table_id(), table_cache, &table));
       auto write_op = std::make_shared<client::YBPgsqlWriteOp>(table, sidecars, &write);
@@ -741,9 +744,24 @@ Status PgClientSession::Perform(
     }
   }
 
-  auto session_info = VERIFY_RESULT(SetupSession(*req, context->GetClientDeadline()));
-  auto* session = session_info.first.session.get();
-  auto ops = VERIFY_RESULT(PrepareOperations(req, session, &context->sidecars(), &table_cache_));
+  PgClientSessionKind kind;
+  if (options.use_catalog_session()) {
+    SCHECK(!options.read_from_followers(),
+           InvalidArgument,
+           "Reading catalog from followers is not allowed");
+    kind = PgClientSessionKind::kCatalog;
+  } else if (options.ddl_mode()) {
+    kind = PgClientSessionKind::kDdl;
+  } else {
+    kind = PgClientSessionKind::kPlain;
+  }
+
+  auto session_info = VERIFY_RESULT(SetupSession(*req, context->GetClientDeadline(), kind));
+  auto* session = session_info.first->session.get();
+  bool has_writes = false;
+  bool has_reads = false;
+  auto ops = VERIFY_RESULT(
+    PrepareOperations(req, session, &context->sidecars(), &table_cache_, &has_writes, &has_reads));
   auto ops_count = ops.size();
   auto data = std::make_shared<PerformData>(PerformData {
     .session_id = id_,
@@ -755,7 +773,44 @@ Status PgClientSession::Perform(
     .cache_setter = std::move(setter)
   });
 
-  auto transaction = session_info.first.transaction;
+  auto transaction = session_info.first->transaction;
+  if (kind == PgClientSessionKind::kPlain && transaction != nullptr) {
+    // TODO: Shouldn't the below logic for DDL transactions as well?
+
+    // We set in_txn_limit only if we are in a transaction.
+
+    // A batch of writes always needs to have the current hybrid time as the in_txn_limit.
+    // See requirement 2b) in src/yb/yql/pggate/README.txt.
+    auto& in_txn_limit_for_reads = session_info.first->in_txn_limit_for_reads;
+    if (has_writes && !has_reads) {
+      auto in_txn_limit = clock_->Now();
+      session->SetInTxnLimit(in_txn_limit);
+      VLOG_WITH_PREFIX(3) << "Using current hybrid time as in txn limit for write ops: "
+                          << in_txn_limit;
+    } else if (has_reads && !has_writes) {
+      if (options.reset_in_txn_limit_for_read_ops()) {
+        in_txn_limit_for_reads = clock_->Now();
+        session->SetInTxnLimit(in_txn_limit_for_reads);
+        VLOG_WITH_PREFIX(3) << "Resetting in txn limit for read ops to : "
+                            << in_txn_limit_for_reads;
+      } else {
+        // If not resetting the in txn limit, it should have already been set earlier.
+        DCHECK(in_txn_limit_for_reads.is_valid());
+        VLOG_WITH_PREFIX(3) << "Reusing in txn limit for read ops : " << in_txn_limit_for_reads;
+      }
+    } else if (has_reads && has_writes) {
+      SCHECK(options.reset_in_txn_limit_for_read_ops(),
+             InvalidArgument,
+             "Can't batch ops of type PgsqlReadRequestPB and PgsqlWriteRequestPB in case the "
+             "in_txn_limit for the read ops was already set for the given SQL statement. This is "
+             "because a new batch of write ops should always use the current hybrid time.");
+      in_txn_limit_for_reads = clock_->Now();
+      session->SetInTxnLimit(in_txn_limit_for_reads);
+      VLOG_WITH_PREFIX(3) << "Resetting in txn limit for read ops to : " << in_txn_limit_for_reads
+                          << ". Using the same for write ops batched with the read ops.";
+    }
+  }
+
   session->FlushAsync([this, data, transaction, ops_count](client::FlushStatus* flush_status) {
     data->FlushDone(flush_status);
     if (transaction) {
@@ -829,22 +884,17 @@ Status PgClientSession::UpdateReadPointForXClusterConsistentReads(
   return Status::OK();
 }
 
-Result<std::pair<PgClientSession::SessionData, PgClientSession::UsedReadTimePtr>>
-PgClientSession::SetupSession(const PgPerformRequestPB& req, CoarseTimePoint deadline) {
+Result<std::pair<PgClientSession::SessionData*, PgClientSession::UsedReadTimePtr>>
+PgClientSession::SetupSession(
+    const PgPerformRequestPB& req, CoarseTimePoint deadline, PgClientSessionKind kind) {
   const auto& options = req.options();
-  PgClientSessionKind kind;
-  if (options.use_catalog_session()) {
-    SCHECK(!options.read_from_followers(),
-           InvalidArgument,
-           "Reading catalog from followers is not allowed");
-    kind = PgClientSessionKind::kCatalog;
+  if (kind == PgClientSessionKind::kCatalog) {
     EnsureSession(kind);
-  } else if (options.ddl_mode()) {
-    kind = PgClientSessionKind::kDdl;
+  } else if (kind == PgClientSessionKind::kDdl) {
     EnsureSession(kind);
     RETURN_NOT_OK(GetDdlTransactionMetadata(true /* use_transaction */, deadline));
   } else {
-    kind = PgClientSessionKind::kPlain;
+    DCHECK(kind == PgClientSessionKind::kPlain);
     RETURN_NOT_OK(BeginTransactionIfNecessary(options, deadline));
   }
 
@@ -860,6 +910,10 @@ PgClientSession::SetupSession(const PgPerformRequestPB& req, CoarseTimePoint dea
     }
     Transaction(kind) = VERIFY_RESULT(RestartTransaction(session, transaction));
     transaction = Transaction(kind).get();
+    if (kind == PgClientSessionKind::kPlain) {
+      sessions_[to_underlying(PgClientSessionKind::kPlain)].in_txn_limit_for_reads =
+          HybridTime();
+    }
   } else {
     RSTATUS_DCHECK(
         kind == PgClientSessionKind::kPlain ||
@@ -884,6 +938,8 @@ PgClientSession::SetupSession(const PgPerformRequestPB& req, CoarseTimePoint dea
             std::shared_ptr<UsedReadTime>(shared_from_this(), &plain_session_used_read_time_));
         std::lock_guard<simple_spinlock>  guard(plain_session_used_read_time_.lock);
         plain_session_used_read_time_.value = ReadHybridTime();
+        sessions_[to_underlying(PgClientSessionKind::kPlain)].in_txn_limit_for_reads =
+            HybridTime();
       }
       VLOG_WITH_PREFIX(3) << "Reset read time: " << session->read_point()->GetReadTime();
     } else {
@@ -903,12 +959,6 @@ PgClientSession::SetupSession(const PgPerformRequestPB& req, CoarseTimePoint dea
 
   if (!options.ddl_mode() && !options.use_catalog_session()) {
     txn_serial_no_ = options.txn_serial_no();
-
-    const auto in_txn_limit = HybridTime::FromPB(options.in_txn_limit_ht());
-    if (in_txn_limit) {
-      VLOG_WITH_PREFIX(3) << "In txn limit: " << in_txn_limit;
-      session->SetInTxnLimit(in_txn_limit);
-    }
   }
 
   session->SetDeadline(deadline);
@@ -918,7 +968,7 @@ PgClientSession::SetupSession(const PgPerformRequestPB& req, CoarseTimePoint dea
     transaction->SetActiveSubTransaction(options.active_sub_transaction_id());
   }
 
-  return std::make_pair(sessions_[to_underlying(kind)], used_read_time);
+  return std::make_pair(&sessions_[to_underlying(kind)], used_read_time);
 }
 
 std::string PgClientSession::LogPrefix() {
@@ -943,6 +993,7 @@ Status PgClientSession::BeginTransactionIfNecessary(
     txn->Abort();
     session->SetTransaction(nullptr);
     txn = nullptr;
+    sessions_[to_underlying(PgClientSessionKind::kPlain)].in_txn_limit_for_reads = HybridTime();
   }
 
   if (isolation == IsolationLevel::NON_TRANSACTIONAL) {
@@ -958,6 +1009,7 @@ Status PgClientSession::BeginTransactionIfNecessary(
         : Status::OK();
   }
 
+  VLOG_WITH_PREFIX(2) << "Initiating a distributed transaction";
   txn = transaction_pool_provider_().Take(
       client::ForceGlobalTransaction(options.force_global_transaction()), deadline);
   txn->SetLogPrefixTag(kTxnLogPrefixTag, id_);

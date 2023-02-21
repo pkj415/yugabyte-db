@@ -2744,7 +2744,8 @@ YBCLockTuple(Relation relation, Datum ybctid, RowMarkType mode, LockWaitPolicy w
 	exec_params.limit_count = 1;
 	exec_params.rowmark = mode;
 	exec_params.wait_policy = wait_policy;
-  exec_params.statement_in_txn_limit = estate->yb_exec_params.statement_in_txn_limit;
+  exec_params.stmt_in_txn_limit_for_reads_already_set =
+		estate->yb_exec_params.stmt_in_txn_limit_for_reads_already_set;
 
 	HTSU_Result res = HeapTupleMayBeUpdated;
 	MemoryContext exec_context = GetCurrentMemoryContext();

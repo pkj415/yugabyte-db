@@ -26,6 +26,8 @@
 #include "yb/util/metrics.h"
 #include "yb/util/tsan_util.h"
 
+#include "yb/server/skewed_clock.h"
+
 DECLARE_bool(enable_ysql);
 DECLARE_bool(hide_pg_catalog_table_creation_logs);
 DECLARE_bool(master_auto_run_initdb);
@@ -68,7 +70,7 @@ void PgMiniTestBase::SetUp() {
   };
   OverrideMiniClusterOptions(&mini_cluster_opt);
   cluster_ = std::make_unique<MiniCluster>(mini_cluster_opt);
-  ASSERT_OK(cluster_->Start(ExtraTServerOptions()));
+  ASSERT_OK(cluster_->Start(ExtraTServerOptions(), TabletServerClockSkew()));
 
   ASSERT_OK(WaitForInitDb(cluster_.get()));
 

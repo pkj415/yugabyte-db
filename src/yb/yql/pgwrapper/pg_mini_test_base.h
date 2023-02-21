@@ -48,6 +48,10 @@ class PgMiniTestBase : public MiniClusterTestWithClient<MiniCluster> {
     return 3;
   }
 
+  virtual std::vector<uint16_t> TabletServerClockSkew() {
+    return std::vector<uint16_t>();
+  }
+
   // This allows changing mini cluster options before the mini cluster is started.
   virtual void OverrideMiniClusterOptions(MiniClusterOptions* options);
 

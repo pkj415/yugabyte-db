@@ -85,6 +85,12 @@ class PgClientSession : public std::enable_shared_from_this<PgClientSession> {
   struct SessionData {
     client::YBSessionPtr session;
     client::YBTransactionPtr transaction;
+    // in_txn_limit_for_reads isn't applicable only for sessions of type PgClientSessionKind::kDdl
+    // and PgClientSessionKind::kCatalog. It is used to ensure that every new client level statement
+    // in YSQL uses one in_txn_limit for all ops of type PgsqlReadRequestPB in that statement.
+    //
+    // Refer ReadHybridTimePB for details on in_txn_limit.
+    HybridTime in_txn_limit_for_reads;
   };
 
   using UsedReadTimePtr = std::weak_ptr<UsedReadTime>;
@@ -118,8 +124,8 @@ class PgClientSession : public std::enable_shared_from_this<PgClientSession> {
   Result<client::YBTransactionPtr> RestartTransaction(
       client::YBSession* session, client::YBTransaction* transaction);
 
-  Result<std::pair<SessionData, PgClientSession::UsedReadTimePtr>> SetupSession(
-      const PgPerformRequestPB& req, CoarseTimePoint deadline);
+  Result<std::pair<SessionData*, PgClientSession::UsedReadTimePtr>> SetupSession(
+      const PgPerformRequestPB& req, CoarseTimePoint deadline, PgClientSessionKind kind);
   Status ProcessResponse(
       const PgClientSessionOperations& operations, const PgPerformRequestPB& req,
       PgPerformResponsePB* resp, rpc::RpcContext* context);

@@ -375,7 +375,7 @@ message PgPerformOptionsPB {
   uint32 isolation = 2;
   bool ddl_mode = 3;
   uint64 txn_serial_no = 4;
-  fixed64 in_txn_limit_ht = 5;
+  fixed64 DEPRECATED_in_txn_limit_ht = 5;
   bool use_existing_priority = 6;
   fixed64 priority = 7;
   bool restart_transaction = 8;
@@ -389,6 +389,17 @@ message PgPerformOptionsPB {
   uint32 active_sub_transaction_id = 16;
   CachingInfo caching_info = 17;
   bool read_from_followers = 18;
+
+  // If true, reset the in_txn_limit for ops of type PgsqlReadRequestPB to the current hybrid time.
+  // This is usually done by the YSQL query layer on the first batch of read ops sent by a new SQL
+  // statement. Post that, all PgsqlReadRequestPB ops should use that same in_txn_limit until a new
+  // statemnt starts.
+  //
+  // For ops of type PgsqlWriteRequestPB, a new in_txn_limit is picked for every new batch of these
+  // ops.
+  //
+  // See src/yb/yql/pggate/README.txt for more information.
+  bool reset_in_txn_limit_for_read_ops = 19;
 }
 
 message PgPerformRequestPB {

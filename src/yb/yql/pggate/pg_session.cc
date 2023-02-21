@@ -177,8 +177,28 @@ class PgSession::RunHelper {
 
   Status Apply(const PgTableDesc& table,
                PgsqlOpPtr op,
-               uint64_t* in_txn_limit,
+               bool* in_txn_limit_for_reads_already_set,
                ForceNonBufferable force_non_bufferable) {
+    // Refer src/yb/yql/pggate/README.txt for details about buffering.
+
+    // TODO(buffering): Consider the following scenario:
+    // 1) A read op arrives here and adds itself to operations_.
+    // 2) Two writes ops follow which change the same row and are added to operations_.
+    //    Should they not be flushed separately? (as per requirement 2b in the README)
+    //
+    // Moreover, consider a situation in which they are flushed separetely, but the in_txn_limit
+    // computation might be incorrect:
+    // 1) A non-bufferable write op on key k1 enters Apply() and is flushed.
+    // 2) A read which has a preset in_txn_limit enters and is added to operations_. The
+    //    in_txn_limit happens to be smaller than the write time of the write op in (1).
+    // 3) Another write to key k1 is added to operations_. But it will end up using the preset
+    //    in_txn_limit. Isn't this incorrect?
+    //
+    // Both scenarios might not occur with any sort of SQL statement. But we should still try to
+    // find statements that can lead to this and fix these cases. Even if we don't find anything
+    // that leads to such scnearios, we should fix these anyway (unless we prove these scenarios
+    // can never occur).
+
     auto& buffer = pg_session_.buffer_;
     // Try buffering this operation if it is a write operation, buffering is enabled and no
     // operations have been already applied to current session (yb session does not exist).
@@ -192,17 +212,43 @@ class PgSession::RunHelper {
                           IsTransactional());
     }
     bool read_only = op->is_read();
+    if (IsTransactional() && !pg_session_.pg_txn_manager_->IsDdlMode()) {
+      // TODO: Do DDL transactions not need in_txn_limit?
+      //
+      // For reads, the in_txn_limit should be picked once for a SQL statement and the same
+      // in_txn_limit should be picked for all later reads in that statement. For a new statement,
+      // a new in_txn_limit would be picked for reads (this would happen because
+      // in_txn_limit_for_reads_already_set would be false the first time any new statement reaches
+      // this execution point).
+      //
+      // This logic satisfies requirement 1 mentioned in README.txt.
+      if (in_txn_limit_for_reads_already_set && !*in_txn_limit_for_reads_already_set) {
+        *in_txn_limit_for_reads_already_set = true;
+        pg_session_.ResetInTxnLimitForReadOpsOnce();
+      }
+    }
+
     // Flush all buffered operations (if any) before performing non-bufferable operation
     if (!Empty(buffer)) {
       SCHECK(operations_.empty(),
             IllegalState,
             "Buffered operations must be flushed before applying first non-bufferable operation");
-      // Buffered operations can't be combined within single RPC with non bufferable operation
-      // in case non bufferable operation has preset in_txn_limit.
-      // Buffered operations must be flushed independently in this case.
-      // Also operations for catalog session can be combined with buffered operations
-      // as catalog session is used for read-only operations.
-      if ((IsTransactional() && in_txn_limit && *in_txn_limit) || IsCatalog()) {
+      // Buffered write operations can't be combined within a single RPC with non-bufferable read
+      // operations in case the reads have a preset in_txn_limit. This is because as per requirement
+      // 1 and 2b) in README.txt, the writes and reads will require a different in_txn_limit. In
+      // case the in_txn_limit wasn't yet picked for the reads, they can be flushed together with
+      // the writes since both would use the current hybrid time as the in_txn_limit.
+      //
+      // Note however that the buffer has to be flushed before the non-buffered op if:
+      // 1) it is a non-buffered read is on a table that is touched by the buffered writes
+      // 2) it is a non-buffered write touches the same key as a buffered write
+      //
+      // Also operations for a catalog session are read-only operations. And "buffer" only buffers
+      // write operations. Since the writes and catalog reads belong to different session types (as
+      // per PgClientSession), we can't send them to the local tserver proxy in 1 rpc, so we flush
+      // the buffer before performing catalog reads.
+      if ((IsTransactional() && in_txn_limit_for_reads_already_set &&
+           *in_txn_limit_for_reads_already_set) || IsCatalog()) {
         RETURN_NOT_OK(buffer.Flush());
       } else {
         operations_ = VERIFY_RESULT(buffer.FlushTake(table, *op, IsTransactional()));
@@ -228,8 +274,7 @@ class PgSession::RunHelper {
           (RowMarkNeedsHigherPriority(row_mark_type) ? kHigherPriorityRange : kLowerPriorityRange);
     read_only = read_only && !IsValidRowMarkType(row_mark_type);
 
-    return pg_session_.pg_txn_manager_->CalculateIsolation(
-        read_only, txn_priority_requirement, in_txn_limit);
+    return pg_session_.pg_txn_manager_->CalculateIsolation(read_only, txn_priority_requirement);
   }
 
   Result<PerformFuture> Flush(std::string&& cache_key) {
@@ -545,10 +590,8 @@ Result<PerformFuture> PgSession::FlushOperations(BufferableOperations ops, bool 
       txn_priority_requirement = kHighestPriority;
     }
 
-    // Use 0 as the value of in_txn_limit to force setting current time as txn limit
-    uint64_t in_txn_limit = 0;
     RETURN_NOT_OK(pg_txn_manager_->CalculateIsolation(
-        false /* read_only */, txn_priority_requirement, &in_txn_limit));
+        false /* read_only */, txn_priority_requirement));
   }
 
   // In case of flushing of non-transactional operations it is required to set read time with the
@@ -613,6 +656,11 @@ Result<PerformFuture> PgSession::Perform(BufferableOperations&& ops, PerformOpti
 
   if (!ops_options.cache_key.empty()) {
     options.mutable_caching_info()->set_key(std::move(ops_options.cache_key));
+  }
+
+  if (reset_in_txn_limit_for_read_ops_once_) {
+    options.set_reset_in_txn_limit_for_read_ops(true);
+    reset_in_txn_limit_for_read_ops_once_ = false;
   }
 
   pg_client_.PerformAsync(&options, &ops.operations, [promise](const PerformResult& result) {
@@ -796,7 +844,7 @@ Status PgSession::ValidatePlacement(const std::string& placement_info) {
 
 template<class Generator>
 Result<PerformFuture> PgSession::DoRunAsync(
-    const Generator& generator, uint64_t* in_txn_limit,
+    const Generator& generator, bool* in_txn_limit_for_reads_already_set,
     ForceNonBufferable force_non_bufferable, std::string&& cache_key) {
   auto table_op = generator();
   SCHECK(!table_op.IsEmpty(), IllegalState, "Operation list must not be empty");
@@ -815,32 +863,37 @@ Result<PerformFuture> PgSession::DoRunAsync(
         op_session_type, group_session_type,
         IllegalState, "Operations on different sessions can't be mixed");
     has_write_ops_in_ddl_mode_ = has_write_ops_in_ddl_mode_ || (ddl_mode && !IsReadOnly(**op));
-    RETURN_NOT_OK(runner.Apply(*table, *op, in_txn_limit, force_non_bufferable));
+    RETURN_NOT_OK(runner.Apply(
+        *table, *op, in_txn_limit_for_reads_already_set, force_non_bufferable));
   }
   return runner.Flush(std::move(cache_key));
 }
 
 Result<PerformFuture> PgSession::RunAsync(const OperationGenerator& generator,
-                                          uint64_t* in_txn_limit,
+                                          bool* in_txn_limit_for_reads_already_set,
                                           ForceNonBufferable force_non_bufferable) {
   return DoRunAsync(
-      generator, in_txn_limit, force_non_bufferable, std::string() /* cache_key */);
+      generator, in_txn_limit_for_reads_already_set, force_non_bufferable,
+      std::string() /* cache_key */);
 }
 
 Result<PerformFuture> PgSession::RunAsync(const ReadOperationGenerator& generator,
-                                          uint64_t* in_txn_limit,
+                                          bool* in_txn_limit_for_reads_already_set,
                                           ForceNonBufferable force_non_bufferable) {
   return DoRunAsync(
-      generator, in_txn_limit, force_non_bufferable, std::string() /* cache_key */);
+      generator, in_txn_limit_for_reads_already_set, force_non_bufferable,
+      std::string() /* cache_key */);
 }
 
 Result<PerformFuture> PgSession::RunAsyncCacheable(
-    const ReadOperationGenerator& generator, uint64_t* in_txn_limit, std::string&& cache_key) {
+    const ReadOperationGenerator& generator,
+    bool* in_txn_limit_for_reads_already_set, std::string&& cache_key) {
   SCHECK(!cache_key.empty(), InvalidArgument, "Cache key can't be empty");
   // Ensure no buffered requests will be added to cached request.
   RETURN_NOT_OK(buffer_.Flush());
   return DoRunAsync(
-      generator, in_txn_limit, ForceNonBufferable::kFalse, std::move(cache_key));
+      generator, in_txn_limit_for_reads_already_set, ForceNonBufferable::kFalse,
+      std::move(cache_key));
 }
 
 Result<bool> PgSession::CheckIfPitrActive() {
