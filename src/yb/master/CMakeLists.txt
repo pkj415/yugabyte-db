@@ -95,7 +95,6 @@ set(MASTER_SRCS
   master_ddl_service.cc
   master_encryption_service.cc
   master_heartbeat_service.cc
-  master_auto_analyze_service.cc
   master_replication_service.cc
   master_options.cc
   master_service_base.cc

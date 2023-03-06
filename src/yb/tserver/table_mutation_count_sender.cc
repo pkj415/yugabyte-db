@@ -59,31 +59,10 @@ namespace tserver {
 // This is basically the "PIMPL" pattern.
 class TableMutationCountSender::Thread {
  public:
-  Thread(const TabletServerOptions& opts, TabletServer* server);
+  Thread(TabletServer* server);
 
   Status Start();
   Status Stop();
-
-  void set_master_addresses(server::MasterAddressesPtr master_addresses) {
-    std::lock_guard<std::mutex> l(master_address_mtx_);
-
-    std::vector<std::string> addresses;
-    for (const auto& address : *master_addresses) {
-      for (const auto& host_port : address) {
-        addresses.push_back(host_port.ToString());
-      }
-    }
-
-    master_addresses_string_ = JoinStrings(addresses, ",");
-
-    if (client_ != NULL) {
-      auto s = client_->SetMasterAddresses(master_addresses_string_);
-      WARN_NOT_OK(
-        s, "Problem setting master addresses for mutation counter sender thread: " + s.ToString());
-    }
-
-    VLOG_WITH_PREFIX(1) << "Setting master addresses to " << master_addresses_string_;
-  }
 
  private:
   void RunThread();
@@ -102,9 +81,6 @@ class TableMutationCountSender::Thread {
   // The actual running thread (NULL before it is started)
   scoped_refptr<yb::Thread> thread_;
 
-  // YBClient to the leader master.
-  std::shared_ptr<client::YBClient> client_;
-
   // Mutex/condition pair to trigger the table mutation count sender thread
   std::mutex mutex_;
   std::condition_variable cond_;
@@ -119,18 +95,11 @@ class TableMutationCountSender::Thread {
 
   const std::string log_prefix_;
 
-  TabletServerOptions opts_;
-
   DISALLOW_COPY_AND_ASSIGN(Thread);
 };
 
-////////////////////////////////////////////////////////////
-// TableMutationCountSender
-////////////////////////////////////////////////////////////
-
-TableMutationCountSender::TableMutationCountSender(const TabletServerOptions& opts,
-                                                   TabletServer* server)
-  : thread_(new Thread(opts, server)) {
+TableMutationCountSender::TableMutationCountSender(TabletServer* server)
+  : thread_(new Thread(server)) {
 }
 
 TableMutationCountSender::~TableMutationCountSender() {
@@ -145,53 +114,18 @@ Status TableMutationCountSender::Stop() {
   return thread_->Stop();
 }
 
-void TableMutationCountSender::set_master_addresses(server::MasterAddressesPtr master_addresses) {
-  thread_->set_master_addresses(std::move(master_addresses));
-}
-////////////////////////////////////////////////////////////
-// TableMutationCountSender::Thread
-////////////////////////////////////////////////////////////
-
-TableMutationCountSender::Thread::Thread(const TabletServerOptions& opts, TabletServer* server)
+TableMutationCountSender::Thread::Thread(TabletServer* server)
   : server_(server),
-    log_prefix_(Format("P $0: ", server_->permanent_uuid())),
-    opts_(opts) {
-  set_master_addresses(opts_.GetMasterAddresses());
+    log_prefix_(Format("P $0: ", server_->permanent_uuid())) {
   VLOG_WITH_PREFIX(1) << "Initializing table mutation count sender thread";
 }
 
 Status TableMutationCountSender::Thread::DoSendMutationCounts() {
   RSTATUS_DCHECK(IsCurrentThread(), InternalError, "Mutation aggregations must be sent from the "
-    "thread inititated from table_mutation_count_sender");
+    "thread initiated from table_mutation_count_sender");
 
-  if (client_ == NULL) {
-    std::lock_guard<std::mutex> l(master_address_mtx_);
-
-    client_ = VERIFY_RESULT(yb::client::YBClientBuilder()
-                            .add_master_server_addr(master_addresses_string_)
-                            .default_admin_operation_timeout(MonoDelta::FromSeconds(
-                                FLAGS_yb_client_admin_operation_timeout_sec))
-                            .Build(server_->messenger()));
-  }
-
-  auto mutation_counts = server_->GetGlobalTableMutationCounter()->GetAndClear();
-
-  // Don't send RPC if there is no mutation for any table at all
-  if (mutation_counts.size() == 0) {
-    return Status::OK();
-  }
-
-  const Status s = client_->IncreaseMutationCounters(&mutation_counts);
-  if (!s.ok()) {
-    // If cluster-level aggregates are not updated, re-add tserver-level mutations back
-    for (auto& table_id_count_pair : mutation_counts) {
-      server_->GetGlobalTableMutationCounter()->Increase(table_id_count_pair.first,
-                                                         table_id_count_pair.second);
-    }
-
-    return s;
-  }
-
+  // TODO(auto-analyze): Send mutations to the auto analyze service that aggregates mutations from
+  // all nodes and triggers ANALYZE as necessary.
   return Status::OK();
 }
 

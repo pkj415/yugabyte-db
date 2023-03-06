@@ -59,8 +59,11 @@ DEFINE_RUNTIME_bool(report_ysql_ddl_txn_status_to_master, false,
                     "If set, at the end of DDL operation, the TServer will notify the YB-Master "
                     "whether the DDL operation was committed or aborted");
 
-DEFINE_RUNTIME_bool(yb_enable_per_table_mutation_counting, true,
-  "Enable counting mutations for tables ");
+DEFINE_RUNTIME_bool(ysql_enable_table_mutation_counter, true,
+  "Enable counting of mutations on a per-table basis. These mutations are used to automatically "
+  "trigger ANALYZE as soon as the mutations of a table cross a certain threshold (decided based on "
+  "ysql_auto_analyze_tuples_threshold and ysql_auto_analyze_scale_factor).");
+TAG_FLAG(ysql_enable_table_mutation_counter, experimental);
 
 DECLARE_bool(ysql_serializable_isolation_for_ddl_txn);
 DECLARE_bool(ysql_ddl_rollback_enabled);
@@ -326,7 +329,7 @@ struct PerformData {
   PgPerformResponsePB* resp;
   rpc::RpcContext context;
   PgClientSessionOperations ops;
-  TransactionTableMutationCounter* transaction_table_mutation_counter;
+  TransactionMutationCounter* transaction_table_mutation_counter;
   std::shared_ptr<GlobalTableMutationCounter> global_table_mutation_counter;
   bool in_distributed_transaction;
   SubTransactionId subtxn_id;
@@ -370,21 +373,21 @@ struct PerformData {
       }
       // In case of write operation, increase mutation counter
       if (op->type() == client::YBOperation::Type::PGSQL_WRITE &&
-          FLAGS_yb_enable_per_table_mutation_counting) {
-        TableId table_id = down_cast<const client::YBPgsqlWriteOp&>(*op).table()->id();
+          FLAGS_ysql_enable_table_mutation_counter) {
+        const TableId& table_id = down_cast<const client::YBPgsqlWriteOp&>(*op).table()->id();
 
         VLOG(4) << SessionLogPrefix(session_id) << "Increasing " <<
-          (in_distributed_transaction ?
-           "transaction_table_mutation_counter" :
-           "global_table_mutation_counter") <<
-          " by 1 for table_id= " << table_id;
+          (in_distributed_transaction ? "transaction_table_mutation_counter"
+                                      : "global_table_mutation_counter") <<
+          " by 1 for table_id: " << table_id;
 
         // If there is no distributed transaction, it means we can directly update the TServer
         // level aggregate. Otherwise increase the transaction level aggregate
-        if (!in_distributed_transaction && global_table_mutation_counter != NULL) {
-          // TODO: Consider increasing it async if it affects performance significantly
-          global_table_mutation_counter->Increase(table_id, 1);
-        } else {
+        if (!in_distributed_transaction) {
+          if (global_table_mutation_counter) {
+            global_table_mutation_counter->Increase(table_id, 1);
+          }
+        } else if (transaction_table_mutation_counter) {
           transaction_table_mutation_counter->Increase(subtxn_id, table_id, 1);
         }
       }
@@ -760,25 +763,14 @@ Status PgClientSession::FinishTransaction(
     // will run its background task to figure out whether the transaction succeeded or failed.
     if (!commit_status.ok()) {
       return commit_status;
-    } else if (FLAGS_yb_enable_per_table_mutation_counting && global_table_mutation_counter_) {
-      // Gather mutated # of rows information for each committed subtxn of transaction.
-      // Then, clear the mutation counters aggregated for it in any case.
-      for (auto& subtxn_mutation_map_pair : transaction_table_mutation_counter_.Get()) {
-        // If the substransaction is aborted, don't send mutations of that subtransaction
-        // to the global mutation counter.
-        if (txn_value->IsSubTransactionAborted(subtxn_mutation_map_pair.first)) {
-          continue;
-        }
-
-        for (auto& table_id_mutation_count_pair : subtxn_mutation_map_pair.second) {
-          auto table_id = table_id_mutation_count_pair.first;
-          auto mutation_count = table_id_mutation_count_pair.second;
-
-          VLOG_WITH_PREFIX(4) << "Incrementing global mutation count by " << mutation_count <<
-            " for the table with the id= " << table_id << " within the txn: " << txn_value->id();
-
-          global_table_mutation_counter_->Increase(table_id, mutation_count);
-        }
+    } else if (FLAGS_ysql_enable_table_mutation_counter && global_table_mutation_counter_) {
+      // Gather mutated # of rows information for each table (count only the committed
+      // sub-transactions).
+      const auto& table_mutations =
+        transaction_table_mutation_counter_.GetTableMutationCounts(
+          txn_value->GetSubTransactionAbortedSet());
+      for (auto it = table_mutations.begin(); it != table_mutations.end(); it++)
+        global_table_mutation_counter_->Increase(it->first, it->second);
       }
     }
 
@@ -1428,11 +1420,11 @@ Status PgClientSession::CheckPlainSessionReadTime() {
 }
 
 const std::map<SubTransactionId, std::map<TableId, uint64>>
-  & TransactionTableMutationCounter::Get() {
+  & TransactionMutationCounter::Get() {
   return subtxn_table_mutation_counter_map_;
 }
 
-void TransactionTableMutationCounter::Increase(SubTransactionId subtxn_id,
+void TransactionMutationCounter::Increase(SubTransactionId subtxn_id,
                                                TableId table_id,
                                                uint64 mutation_count) {
   if (subtxn_table_mutation_counter_map_[subtxn_id].contains(table_id)) {
@@ -1442,8 +1434,30 @@ void TransactionTableMutationCounter::Increase(SubTransactionId subtxn_id,
   }
 }
 
-void TransactionTableMutationCounter::Clear() {
+void TransactionMutationCounter::Clear() {
   subtxn_table_mutation_counter_map_.clear();
+}
+
+const std::map<TableId, int>& GetTableMutationCounts(SubtxnSet aborted_sub_txn_set) {
+  std::map<TableId, int> table_mutation_counts;
+  for (auto& subtxn_mutation_map_pair : subtxn_table_mutation_counter_map_) {
+    if (txn_value->IsSubTransactionAborted(subtxn_mutation_map_pair.first)) {
+      continue;
+    }
+
+    for (auto& table_id_mutation_count_pair : subtxn_mutation_map_pair.second) {
+      auto table_id = table_id_mutation_count_pair.first;
+      auto mutation_count = table_id_mutation_count_pair.second;
+
+      VLOG_WITH_PREFIX(4) << "Incrementing global mutation count by " << mutation_count <<
+        " for the table with the id= " << table_id << " within the txn: " << txn_value->id();
+
+      if (table_mutation_counts.find(table_id) == table_mutation_counts.end())
+        table_mutation_counts[table_id] = 0;
+      table_mutation_counts[table_id] += mutation_count;
+    }
+  }
+  return table_mutation_counts;
 }
 
 }  // namespace tserver

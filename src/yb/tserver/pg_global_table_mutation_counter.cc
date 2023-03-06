@@ -39,9 +39,8 @@
 namespace yb {
 namespace tserver {
 
-  void GlobalTableMutationCounter::Increase(TableId table_id, uint64 mutation_count)
-    EXCLUDES(mutex_) {
-    VLOG_WITH_FUNC(4) << "table_id= " << table_id << " mutation_count=" << mutation_count;
+  void GlobalTableMutationCounter::Increase(TableId table_id, uint64 mutation_count) {
+    VLOG_WITH_FUNC(4) << "table_id: " << table_id << " mutation_count: " << mutation_count;
     {
       SharedLock shared_lock(mutex_);
       if (table_mutation_counts_.contains(table_id)) {

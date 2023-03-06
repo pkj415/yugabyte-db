@@ -27,13 +27,10 @@ class TabletServerOptions;
 
 class TableMutationCountSender {
  public:
-  TableMutationCountSender(const TabletServerOptions& options, TabletServer* server);
+  TableMutationCountSender(TabletServer* server);
+  ~TableMutationCountSender();
   Status Start();
   Status Stop();
-
-  void set_master_addresses(server::MasterAddressesPtr master_addresses);
-
-  ~TableMutationCountSender();
 
  private:
   class Thread;

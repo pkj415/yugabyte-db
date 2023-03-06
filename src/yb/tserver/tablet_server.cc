@@ -196,8 +196,6 @@ TAG_FLAG(xcluster_svc_queue_length, advanced);
 
 DECLARE_string(cert_node_filename);
 
-DECLARE_bool(yb_init_auto_analyze);
-
 namespace yb {
 namespace tserver {
 
@@ -340,9 +338,6 @@ Status TabletServer::UpdateMasterAddresses(const consensus::RaftConfigPB& new_co
   opts_.SetMasterAddresses(new_master_addresses);
 
   heartbeater_->set_master_addresses(new_master_addresses);
-  if (table_mutation_count_sender_ != NULL) {
-    table_mutation_count_sender_->set_master_addresses(new_master_addresses);
-  }
 
   return Status::OK();
 }
@@ -376,9 +371,7 @@ Status TabletServer::Init() {
     metrics_snapshotter_.reset(new MetricsSnapshotter(opts_, this));
   }
 
-  if (FLAGS_yb_init_auto_analyze) {
-    table_mutation_count_sender_.reset(new TableMutationCountSender(opts_, this));
-  }
+  table_mutation_count_sender_.reset(new TableMutationCountSender(this));
 
   std::vector<HostPort> hps;
   for (const auto& master_addr_vector : *opts_.GetMasterAddresses()) {
@@ -559,7 +552,7 @@ Status TabletServer::Start() {
     RETURN_NOT_OK(metrics_snapshotter_->Start());
   }
 
-  if (FLAGS_yb_init_auto_analyze) {
+  if (table_mutation_count_sender_) {
     RETURN_NOT_OK(table_mutation_count_sender_->Start());
   }
 
@@ -587,9 +580,9 @@ void TabletServer::Shutdown() {
       WARN_NOT_OK(metrics_snapshotter_->Stop(), "Failed to stop TS Metrics Snapshotter thread");
     }
 
-    if (FLAGS_yb_init_auto_analyze) {
-        WARN_NOT_OK(table_mutation_count_sender_->Stop(),
-                    "Failed to stop table mutation count sender thread");
+    if (table_mutation_count_sender_) {
+      WARN_NOT_OK(table_mutation_count_sender_->Stop(),
+          "Failed to stop table mutation count sender thread");
     }
 
     tablet_manager_->StartShutdown();

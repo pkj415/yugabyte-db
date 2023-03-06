@@ -121,10 +121,6 @@ class TabletServer : public DbServerBase, public TabletServerIf {
 
   MetricsSnapshotter* metrics_snapshotter() { return metrics_snapshotter_.get(); }
 
-  TableMutationCountSender* table_mutation_count_sender() {
-    return table_mutation_count_sender_.get();
-  }
-
   void set_fail_heartbeats_for_tests(bool fail_heartbeats_for_tests) {
     base::subtle::NoBarrier_Store(&fail_heartbeats_for_tests_, fail_heartbeats_for_tests);
   }

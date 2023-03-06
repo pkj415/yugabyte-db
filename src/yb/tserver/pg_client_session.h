@@ -77,14 +77,15 @@ using PgClientSessionOperations = std::vector<std::shared_ptr<client::YBPgsqlOp>
 
 YB_DEFINE_ENUM(PgClientSessionKind, (kPlain)(kDdl)(kCatalog)(kSequence));
 
-class TransactionTableMutationCounter {
+class TransactionMutationCounter {
  public:
-  TransactionTableMutationCounter() {
-    subtxn_table_mutation_counter_map_ = std::map<SubTransactionId, std::map<TableId, uint64>>();
-  }
+  TransactionMutationCounter() = default;
 
-  void Increase(SubTransactionId subtxn_id, TableId table_id, uint64 mutation_count);
+  void Increase(SubTransactionId subtxn_id, const TableId& table_id, uint64 mutation_count);
   void Clear();
+  // Get aggregated mutations for each table across the whole transaction (exclude aborted
+  // sub-transactions).
+  const std::map<TableId, int>& GetTableMutationCounts(SubtxnSet aborted_sub_txn_set);
   const std::map<SubTransactionId, std::map<TableId, uint64>> & Get();
 
  private:
@@ -191,7 +192,7 @@ class PgClientSession : public std::enable_shared_from_this<PgClientSession> {
   boost::optional<uint64_t> saved_priority_;
   TransactionMetadata ddl_txn_metadata_;
   UsedReadTime plain_session_used_read_time_;
-  TransactionTableMutationCounter transaction_table_mutation_counter_;
+  TransactionMutationCounter transaction_table_mutation_counter_;
 };
 
 }  // namespace tserver

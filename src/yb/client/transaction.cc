@@ -901,9 +901,8 @@ class YBTransaction::Impl final : public internal::TxnBatcherIf {
     return subtransaction_.active() && subtransaction_.HasSubTransaction(id);
   }
 
-  bool IsSubTransactionAborted(SubTransactionId id) {
-    AbortedSubTransactionSet aborted_subtxn_set = subtransaction_.get().aborted;
-    return !aborted_subtxn_set.IsEmpty() && aborted_subtxn_set.Test(id);
+  const SubtxnSet& GetSubTransactionAbortedSet() const {
+    return subtransaction_.get().aborted;
   }
 
   Status RollbackToSubTransaction(SubTransactionId id, CoarseTimePoint deadline) EXCLUDES(mutex_) {
