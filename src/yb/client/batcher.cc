@@ -544,8 +544,6 @@ void Batcher::ExecuteOperations(Initial initial) {
   }
   state_ = BatcherState::kTransactionReady;
 
-  const bool force_consistent_read = force_consistent_read_ || this->transaction();
-
   // Use big enough value for preallocated storage, to avoid unnecessary allocations.
   boost::container::small_vector<std::shared_ptr<AsyncRpc>,
                                  InFlightOpsGroupsWithMetadata::kPreallocatedCapacity> rpcs;
@@ -553,7 +551,8 @@ void Batcher::ExecuteOperations(Initial initial) {
 
   // Now flush the ops for each group.
   // Consistent read is not required when whole batch fits into one command.
-  const auto need_consistent_read = force_consistent_read || ops_info_.groups.size() > 1;
+  const auto need_consistent_read =
+      force_consistent_read_ || this->transaction() || ops_info_.groups.size() > 1;
 
   auto self = shared_from_this();
   for (const auto& group : ops_info_.groups) {
