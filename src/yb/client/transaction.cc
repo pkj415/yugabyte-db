@@ -901,6 +901,11 @@ class YBTransaction::Impl final : public internal::TxnBatcherIf {
     return subtransaction_.active() && subtransaction_.HasSubTransaction(id);
   }
 
+  bool IsSubTransactionAborted(SubTransactionId id) {
+    AbortedSubTransactionSet aborted_subtxn_set = subtransaction_.get().aborted;
+    return !aborted_subtxn_set.IsEmpty() && aborted_subtxn_set.Test(id);
+  }
+
   Status RollbackToSubTransaction(SubTransactionId id, CoarseTimePoint deadline) EXCLUDES(mutex_) {
     SCHECK(
         subtransaction_.active(), InternalError,
@@ -2204,6 +2209,10 @@ Status YBTransaction::RollbackToSubTransaction(SubTransactionId id, CoarseTimePo
 
 bool YBTransaction::HasSubTransaction(SubTransactionId id) {
   return impl_->HasSubTransaction(id);
+}
+
+bool YBTransaction::IsSubTransactionAborted(SubTransactionId id) {
+  return impl_->IsSubTransactionAborted(id);
 }
 
 void YBTransaction::SetLogPrefixTag(const LogPrefixName& name, uint64_t value) {

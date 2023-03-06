@@ -77,6 +77,10 @@ DEFINE_RUNTIME_uint32(external_transaction_retention_window_secs, 60 * 60 * 24,
                       "Retention window on both the coordinator and participant for uncommitted "
                       "transactions from a producer.");
 
+DEFINE_NON_RUNTIME_bool(yb_init_auto_analyze, true,
+    "If true, enable the auto-analyze framework to aggregate mutation counts for each table and "
+    "trigger ANALYZE command automatically");
+
 namespace yb {
 
 static int GetYCQLNumShardsPerTServer() {

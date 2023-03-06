@@ -54,6 +54,7 @@
 #include "yb/tserver/tablet_server_interface.h"
 #include "yb/tserver/tablet_server_options.h"
 #include "yb/tserver/xcluster_safe_time_map.h"
+#include "yb/tserver/pg_global_table_mutation_counter.h"
 
 #include "yb/util/locks.h"
 #include "yb/util/net/net_util.h"
@@ -119,6 +120,10 @@ class TabletServer : public DbServerBase, public TabletServerIf {
   Heartbeater* heartbeater() { return heartbeater_.get(); }
 
   MetricsSnapshotter* metrics_snapshotter() { return metrics_snapshotter_.get(); }
+
+  TableMutationCountSender* table_mutation_count_sender() {
+    return table_mutation_count_sender_.get();
+  }
 
   void set_fail_heartbeats_for_tests(bool fail_heartbeats_for_tests) {
     base::subtle::NoBarrier_Store(&fail_heartbeats_for_tests_, fail_heartbeats_for_tests);
@@ -262,6 +267,8 @@ class TabletServer : public DbServerBase, public TabletServerIf {
 
   const XClusterSafeTimeMap& GetXClusterSafeTimeMap() const;
 
+  const std::shared_ptr<GlobalTableMutationCounter>& GetGlobalTableMutationCounter();
+
   void UpdateXClusterSafeTime(const XClusterNamespaceToSafeTimePBMap& safe_time_map);
 
   Result<bool> XClusterSafeTimeCaughtUpToCommitHt(
@@ -323,6 +330,9 @@ class TabletServer : public DbServerBase, public TabletServerIf {
   // Thread responsible for collecting metrics snapshots for native storage.
   std::unique_ptr<MetricsSnapshotter> metrics_snapshotter_;
 
+  // Thread responsible for sending aggregated table mutations to the auto analyzer service
+  std::unique_ptr<TableMutationCountSender> table_mutation_count_sender_;
+
   // Webserver path handlers
   std::unique_ptr<TabletServerPathHandlers> path_handlers_;
 
@@ -378,6 +388,8 @@ class TabletServer : public DbServerBase, public TabletServerIf {
   HostPort pgsql_proxy_bind_address_;
 
   XClusterSafeTimeMap xcluster_safe_time_map_;
+
+  std::shared_ptr<GlobalTableMutationCounter> global_table_mutation_counter_;
 
   PgConfigReloader pg_config_reloader_;
 

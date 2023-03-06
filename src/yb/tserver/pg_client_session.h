@@ -49,6 +49,8 @@ class XClusterSafeTimeMap;
 
 namespace tserver {
 
+class GlobalTableMutationCounter;
+
 #define PG_CLIENT_SESSION_METHODS \
     (AlterDatabase) \
     (AlterTable) \
@@ -75,6 +77,21 @@ using PgClientSessionOperations = std::vector<std::shared_ptr<client::YBPgsqlOp>
 
 YB_DEFINE_ENUM(PgClientSessionKind, (kPlain)(kDdl)(kCatalog)(kSequence));
 
+class TransactionTableMutationCounter {
+ public:
+  TransactionTableMutationCounter() {
+    subtxn_table_mutation_counter_map_ = std::map<SubTransactionId, std::map<TableId, uint64>>();
+  }
+
+  void Increase(SubTransactionId subtxn_id, TableId table_id, uint64 mutation_count);
+  void Clear();
+  const std::map<SubTransactionId, std::map<TableId, uint64>> & Get();
+
+ private:
+  std::map<SubTransactionId, std::map<TableId, uint64>> subtxn_table_mutation_counter_map_;
+  int current_subtxn_id_ = -1;
+};
+
 class PgClientSession : public std::enable_shared_from_this<PgClientSession> {
  public:
   struct UsedReadTime {
@@ -94,6 +111,7 @@ class PgClientSession : public std::enable_shared_from_this<PgClientSession> {
       client::YBClient* client, const scoped_refptr<ClockBase>& clock,
       std::reference_wrapper<const TransactionPoolProvider> transaction_pool_provider,
       PgTableCache* table_cache, const XClusterSafeTimeMap* xcluster_safe_time_map,
+      std::shared_ptr<GlobalTableMutationCounter> global_table_mutation_counter,
       PgResponseCache* response_cache);
 
   uint64_t id() const;
@@ -165,6 +183,7 @@ class PgClientSession : public std::enable_shared_from_this<PgClientSession> {
   const TransactionPoolProvider& transaction_pool_provider_;
   PgTableCache& table_cache_;
   const XClusterSafeTimeMap* xcluster_safe_time_map_;
+  std::shared_ptr<GlobalTableMutationCounter> global_table_mutation_counter_;
   PgResponseCache& response_cache_;
 
   std::array<SessionData, kPgClientSessionKindMapSize> sessions_;
@@ -172,6 +191,7 @@ class PgClientSession : public std::enable_shared_from_this<PgClientSession> {
   boost::optional<uint64_t> saved_priority_;
   TransactionMetadata ddl_txn_metadata_;
   UsedReadTime plain_session_used_read_time_;
+  TransactionTableMutationCounter transaction_table_mutation_counter_;
 };
 
 }  // namespace tserver

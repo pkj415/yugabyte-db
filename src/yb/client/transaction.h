@@ -175,6 +175,8 @@ class YBTransaction : public std::enable_shared_from_this<YBTransaction> {
 
   bool HasSubTransaction(SubTransactionId id);
 
+  bool IsSubTransactionAborted(SubTransactionId id);
+
   void SetLogPrefixTag(const LogPrefixName& name, uint64_t value);
 
  private:
