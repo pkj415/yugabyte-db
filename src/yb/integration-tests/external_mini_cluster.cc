@@ -74,6 +74,7 @@
 
 #include "yb/server/server_base.pb.h"
 #include "yb/server/server_base.proxy.h"
+#include "yb/server/skewed_clock.h"
 
 #include "yb/tserver/tserver_admin.proxy.h"
 #include "yb/tserver/tserver_service.proxy.h"
@@ -287,13 +288,15 @@ ExternalMiniCluster::ExternalMiniCluster(const ExternalMiniClusterOptions& opts)
     : opts_(opts), add_new_master_at_(-1) {
   opts_.AdjustMasterRpcPorts();
   // These "extra mini cluster options" are added in the end of the command line.
+  // TODO: Run with clock skew with only a 50% probability.
   const auto common_extra_flags = {
       "--TEST_running_test=true"s,
       "--enable_tracing"s,
       Format("--memory_limit_hard_bytes=$0", kDefaultMemoryLimitHardBytes),
       Format("--never_fsync=$0", FLAGS_never_fsync),
       (opts.log_to_file ? "--alsologtostderr"s : "--logtostderr"s),
-      Format("--rpc_slow_query_threshold_ms=$0", NonTsanVsTsan("10000", "20000"))};
+      Format("--rpc_slow_query_threshold_ms=$0", NonTsanVsTsan("10000", "20000")),
+      Format("--time_source=$0,$${index}99", server::SkewedClock::kName)};
   for (auto* extra_flags : {&opts_.extra_master_flags, &opts_.extra_tserver_flags}) {
     // Common default extra flags are inserted in the beginning so that they can be overridden by
     // caller-specified flags.
