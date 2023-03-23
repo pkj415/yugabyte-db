@@ -71,7 +71,7 @@ Status TableMutationCountSender::DoSendMutationCounts() {
   // Send mutations to the auto analyze stateful service that aggregates mutations from all nodes
   // and triggers ANALYZE as necessary.
 
-  auto mutation_counts = server_->GetPgNodeLevelMutationCounter()->GetAndClear();
+  auto mutation_counts = server_->GetPgNodeLevelMutationCounter().GetAndClear();
   if (mutation_counts.size() == 0) {
     return Status::OK();
   }
@@ -105,7 +105,7 @@ Status TableMutationCountSender::DoSendMutationCounts() {
     // avoiding over-aggresive auto ANALYZE).
     if (s.IsTryAgain()) {
       for (auto& [table_id, mutation_count] : mutation_counts) {
-        server_->GetPgNodeLevelMutationCounter()->Increase(table_id, mutation_count);
+        server_->GetPgNodeLevelMutationCounter().Increase(table_id, mutation_count);
       }
     }
     return s;

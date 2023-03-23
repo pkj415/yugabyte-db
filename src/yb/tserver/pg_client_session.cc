@@ -344,7 +344,7 @@ struct PerformData {
   rpc::RpcContext context;
   PgClientSessionOperations ops;
   client::YBTransactionPtr transaction;
-  std::shared_ptr<PgMutationCounter> pg_node_level_mutation_counter;
+  PgMutationCounter* pg_node_level_mutation_counter;
   SubTransactionId subtxn_id;
   PgTableCache* table_cache;
   PgClientSession::UsedReadTimePtr used_read_time;
@@ -449,7 +449,7 @@ PgClientSession::PgClientSession(
     uint64_t id, client::YBClient* client, const scoped_refptr<ClockBase>& clock,
     std::reference_wrapper<const TransactionPoolProvider> transaction_pool_provider,
     PgTableCache* table_cache, const XClusterSafeTimeMap* xcluster_safe_time_map,
-    std::shared_ptr<PgMutationCounter> pg_node_level_mutation_counter,
+    PgMutationCounter* pg_node_level_mutation_counter,
     PgResponseCache* response_cache)
     : id_(id),
       client_(*client),
