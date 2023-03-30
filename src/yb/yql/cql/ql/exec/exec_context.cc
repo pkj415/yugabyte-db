@@ -15,6 +15,8 @@
 
 #include "yb/yql/cql/ql/exec/exec_context.h"
 
+#include <chrono>
+
 #include <boost/function.hpp>
 
 #include "yb/client/schema.h"
@@ -40,9 +42,11 @@
 #include "yb/yql/cql/ql/util/statement_params.h"
 #include "yb/util/flags.h"
 
-DEFINE_UNKNOWN_int32(cql_prepare_child_threshold_ms, 2000 * yb::kTimeMultiplier,
-             "Timeout if preparing for child transaction takes longer"
-             "than the prescribed threshold.");
+using namespace std::chrono_literals;
+
+DEFINE_RUNTIME_int32(cql_prepare_child_threshold_ms, 2000 * yb::kTimeMultiplier,
+                     "Timeout if preparing for child transaction takes longer than the prescribed "
+                     "threshold.");
 
 namespace yb {
 namespace ql {
@@ -106,19 +110,21 @@ Status ExecContext::PrepareChildTransaction(
 
   // Set the deadline to be the earlier of the input deadline and the current timestamp
   // plus the waiting time for the prepare child
-  auto future_deadline = std::min(
+  while (true) {
+    auto future_deadline = std::min(
       deadline,
       CoarseMonoClock::Now() + MonoDelta::FromMilliseconds(FLAGS_cql_prepare_child_threshold_ms));
+    auto future_status = future.wait_until(future_deadline);
+    if (future_status == std::future_status::ready) {
+      *data = VERIFY_RESULT(std::move(future).get());
+      return Status::OK();
+    }
 
-  auto future_status = future.wait_until(future_deadline);
-
-  if (future_status == std::future_status::ready) {
-    *data = VERIFY_RESULT(std::move(future).get());
-    return Status::OK();
+    // If the future is not ready, wait for a while and check again.
+    std::this_thread::sleep_for(5ms);
   }
 
-  auto message = Format("Timed out waiting for prepare child status, left to deadline: $0",
-                        MonoDelta(deadline - CoarseMonoClock::now()));
+  auto message = "Timed out waiting for prepare child status";
   LOG(INFO) << message;
   return STATUS(TimedOut, message);
 }

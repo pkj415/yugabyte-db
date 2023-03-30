@@ -243,7 +243,7 @@ Status ProcessUsedReadTime(uint64_t session_id,
       }
       used_read_time.value = op_used_read_time;
     }
-    VLOG(3) << SessionLogPrefix(session_id) << "Update used read time: " << op_used_read_time;
+    LOG_WITH_PREFIX(INFO) << SessionLogPrefix(session_id) << "Update used read time: " << op_used_read_time;
   }
   return Status::OK();
 }
@@ -801,7 +801,7 @@ Status PgClientSession::FinishTransaction(
 
 Status PgClientSession::Perform(
     PgPerformRequestPB* req, PgPerformResponsePB* resp, rpc::RpcContext* context) {
-  VLOG_WITH_PREFIX(5) << "Perform req=" << req->ShortDebugString();
+  LOG_WITH_PREFIX(INFO) << "Perform req=" << req->ShortDebugString();
   PgResponseCache::Setter setter;
   auto& options = *req->mutable_options();
   if (options.has_caching_info()) {
@@ -1449,6 +1449,7 @@ client::YBTransactionPtr& PgClientSession::Transaction(PgClientSessionKind kind)
 Status PgClientSession::CheckPlainSessionReadTime() {
   auto session = Session(PgClientSessionKind::kPlain);
   if (!session->read_point()->GetReadTime()) {
+    LOG_WITH_PREFIX(INFO) << "Session read time not found";
     ReadHybridTime used_read_time;
     {
       std::lock_guard<simple_spinlock> guard(plain_session_used_read_time_.lock);
