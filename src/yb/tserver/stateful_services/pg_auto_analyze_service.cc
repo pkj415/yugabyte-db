@@ -13,7 +13,26 @@
 
 #include "yb/tserver/stateful_services/pg_auto_analyze_service.h"
 
+#include "yb/bfql/gen_opcodes.h"
+#include "yb/client/client.h"
+#include "yb/client/error.h"
+#include "yb/client/session.h"
+#include "yb/client/schema.h"
+#include "yb/client/table_handle.h"
+#include "yb/client/yb_op.h"
+#include "yb/client/yb_table_name.h"
+#include "yb/master/master_defaults.h"
+#include "yb/tserver/pg_mutation_counter.h"
+#include "yb/util/atomic.h"
 #include "yb/util/logging.h"
+#include "yb/util/status.h"
+#include "yb/util/string_case.h"
+
+DEFINE_RUNTIME_uint32(ysql_cluster_level_mutation_persist_interval_ms, 10000,
+                      "Interval at which the reported node level table mutation counts are "
+                      "persisted to the underlying YCQL table by the central auto analyze service");
+
+using namespace std::chrono_literals;
 
 namespace yb {
 
@@ -27,18 +46,89 @@ void PgAutoAnalyzeService::Activate() { LOG(INFO) << "PgAutoAnalyzeService activ
 
 void PgAutoAnalyzeService::Deactivate() { LOG(INFO) << "PgAutoAnalyzeService de-activated"; }
 
+Status PgAutoAnalyzeService::UpdateMutationsSinceLastAnalyze() {
+  const auto& table_mutation_counts = pg_cluster_level_mutation_counter_.GetAndClear();
+  if (table_mutation_counts.empty()) {
+    VLOG(5) << "No more mutations";
+    return Status::OK();
+  }
+
+  auto session = VERIFY_RESULT(GetYBSession());
+  auto* table = VERIFY_RESULT(GetServiceTable());
+
+  session->SetTimeout(PeriodicTaskIntervalMs() * 1ms);
+  session->SetDeadline(CoarseMonoClock::now() + PeriodicTaskIntervalMs() * 1ms);
+
+  // Increment mutation counters for tables
+  const client::YBSchema& schema = table->schema();
+  auto mutations_col_id = schema.ColumnId(schema.FindColumn(master::kPgAutoAnalyzeMutations));
+
+  VLOG(2) << "Apply mutations: " << AsString(table_mutation_counts);
+
+  // INSERT entries for tables that don't exist in the auto analyze table
+  std::vector<client::YBOperationPtr> ops;
+  ops.reserve(table_mutation_counts.size());
+  for (const auto& [table_id, mutation_count] : table_mutation_counts) {
+    const auto op = table->NewWriteOp(QLWriteRequestPB::QL_STMT_UPDATE);
+    auto* const upsert_req = op->mutable_request();
+    QLAddStringHashValue(upsert_req, table_id);
+    table->AddInt64ColumnValue(upsert_req, master::kPgAutoAnalyzeMutations, 0);
+    upsert_req->mutable_if_expr()->mutable_condition()->set_op(::yb::QLOperator::QL_OP_NOT_EXISTS);
+    VLOG(4) << "Insert table entry if does not exist - " << upsert_req->ShortDebugString();
+    ops.push_back(std::move(op));
+  }
+
+  RETURN_NOT_OK_PREPEND(
+      session->ApplyAndFlushSync(ops), "Failed to insert entries into auto analyze table");
+
+  ops.clear();
+  for (const auto& [table_id, mutation_count] : table_mutation_counts) {
+    const auto op = table->NewWriteOp(QLWriteRequestPB::QL_STMT_UPDATE);
+    auto* const update_req = op->mutable_request();
+    QLAddStringHashValue(update_req, table_id);
+    update_req->mutable_column_refs()->add_ids(mutations_col_id);
+    QLColumnValuePB *col_pb = update_req->add_column_values();
+    col_pb->set_column_id(mutations_col_id);
+    QLBCallPB* bfcall_expr_pb = col_pb->mutable_expr()->mutable_bfcall();
+    bfcall_expr_pb->set_opcode(to_underlying(bfql::BFOpcode::OPCODE_AddI64I64_80));
+    QLExpressionPB* operand1 = bfcall_expr_pb->add_operands();
+    QLExpressionPB* operand2 = bfcall_expr_pb->add_operands();
+    operand1->set_column_id(mutations_col_id);
+    operand2->mutable_value()->set_int64_value(mutation_count);
+    VLOG(4) << "Increment table mutations - " << update_req->ShortDebugString();
+    ops.push_back(std::move(op));
+  }
+
+  RETURN_NOT_OK_PREPEND(
+      session->ApplyAndFlushSync(ops), "Failed to aggregate mutations into auto analyze table");
+
+  // TODO(auto-analyze): For mutations that surely weren't applied to the underlying table, re-add
+  // to pg_cluster_level_mutation_counter_.
+  return Status::OK();
+}
+
+uint32 PgAutoAnalyzeService::PeriodicTaskIntervalMs() const {
+  return GetAtomicFlag(&FLAGS_ysql_cluster_level_mutation_persist_interval_ms);
+}
+
 Result<bool> PgAutoAnalyzeService::RunPeriodicTask() {
-  VLOG(5) << "PgAutoAnalyzeService Running";
-  // TODO: Trigger ANALYZE for tables if their mutation count has reached specific thresholds.
+  // Update the underlying YCQL table that tracks cluster-wide mutations since the last
+  // ANALYZE for all Pg tables.
+  auto status = UpdateMutationsSinceLastAnalyze();
+  LOG_IF(WARNING, !status.ok()) << "Failed to update mutations: " << status;
+
+  // TODO(auto-analyze): Trigger ANALYZE for tables whose mutation counts have crossed the required
+  // thresholds.
   return true;
 }
 
 Status PgAutoAnalyzeService::IncreaseMutationCountersImpl(
     const IncreaseMutationCountersRequestPB& req, IncreaseMutationCountersResponsePB* resp) {
-  VLOG_WITH_FUNC(5) << "req=" << req.ShortDebugString();
+  VLOG_WITH_FUNC(3) << "req=" << req.ShortDebugString();
 
-  // TODO: Update the underlying YCQL table that tracks cluster-wide mutations since the last
-  // ANALYZE for all Pg tables.
+  for (const auto& elem : req.table_mutation_counts()) {
+    pg_cluster_level_mutation_counter_.Increase(elem.table_id(), elem.mutation_count());
+  }
 
   return Status::OK();
 }

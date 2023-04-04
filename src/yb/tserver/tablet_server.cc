@@ -436,6 +436,7 @@ Status TabletServer::Init() {
     metrics_snapshotter_.reset(new MetricsSnapshotter(opts_, this));
   }
 
+  // TODO(auto-analyze): this should be under a non-runtime flag since it is part of Init().
   if (GetAtomicFlag(&FLAGS_ysql_enable_table_mutation_counter)) {
     pg_table_mutation_count_sender_.reset(new TableMutationCountSender(this));
   }
@@ -586,8 +587,8 @@ Status TabletServer::RegisterServices() {
         FLAGS_TEST_echo_svc_queue_length, std::move(test_echo_service)));
   }
 
-  auto pg_auto_analyze_service =
-      std::make_shared<stateful_service::PgAutoAnalyzeService>(metric_entity(), client_future());
+  auto pg_auto_analyze_service = std::make_shared<stateful_service::PgAutoAnalyzeService>(
+      metric_entity(), tablet_manager_->client_future());
   LOG(INFO) << "yb::tserver::stateful_service::PgAutoAnalyzeService created at "
             << pg_auto_analyze_service.get();
   RETURN_NOT_OK(pg_auto_analyze_service->Init(tablet_manager_.get()));

@@ -20,9 +20,19 @@
 #include "yb/gutil/casts.h"
 #include "yb/gutil/strings/join.h"
 
+#include "yb/integration-tests/mini_cluster.h"
+
+#include "yb/rpc/messenger.h"
+
+#include "yb/tserver/mini_tablet_server.h"
+#include "yb/tserver/tablet_server.h"
+
 #include "yb/util/enums.h"
 #include "yb/util/status_log.h"
 #include "yb/util/tsan_util.h"
+
+#include "yb/yql/cql/cqlserver/cql_server.h"
+#include "yb/yql/cql/cqlserver/cql_server_options.h"
 
 using std::string;
 
@@ -515,6 +525,32 @@ Result<CassandraSession> EstablishSession(CppCassandraDriver* driver) {
       session.ExecuteQuery(Format("CREATE KEYSPACE IF NOT EXISTS $0;", kCqlTestKeyspace)));
   RETURN_NOT_OK(session.ExecuteQuery(Format("USE $0;", kCqlTestKeyspace)));
   return session;
+}
+
+Status StartCQLServer(
+    MiniCluster* cluster_, uint16_t* cql_port, std::string& cql_host,
+    std::unique_ptr<cqlserver::CQLServer>& cql_server,
+    client::YBClient* client) {
+  auto* mini_tserver = cluster_->mini_tablet_server(0);
+  auto* tserver = mini_tserver->server();
+
+  const auto& tserver_options = tserver->options();
+  cqlserver::CQLServerOptions cql_server_options;
+  cql_server_options.fs_opts = tserver_options.fs_opts;
+  cql_server_options.master_addresses_flag = tserver_options.master_addresses_flag;
+  cql_server_options.SetMasterAddresses(tserver_options.GetMasterAddresses());
+
+  if (*cql_port == 0) {
+    *cql_port = cluster_->AllocateFreePort();
+  }
+  cql_host = mini_tserver->bound_rpc_addr().address().to_string();
+  cql_server_options.rpc_opts.rpc_bind_addresses = Format("$0:$1", cql_host, *cql_port);
+
+  cql_server = std::make_unique<cqlserver::CQLServer>(
+      cql_server_options,
+      &client->messenger()->io_service(), tserver);
+
+  return cql_server->Start();
 }
 
 } // namespace yb

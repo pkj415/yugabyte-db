@@ -13199,6 +13199,7 @@ Status CatalogManager::GetStatefulServiceLocation(
   service_info->mutable_broadcast_addresses()->CopyFrom(registration.broadcast_addresses());
   service_info->mutable_cloud_info()->CopyFrom(registration.cloud_info());
 
+  VLOG(3) << "service_info: " << service_info->ShortDebugString();
   return Status::OK();
 }
 

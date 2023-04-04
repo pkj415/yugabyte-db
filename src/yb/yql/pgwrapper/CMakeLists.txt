@@ -91,7 +91,7 @@ ADD_YB_LIBRARY(ysql_upgrade
                DEPS ${YSQL_UPGRADE_DEPS})
 
 set(YB_TEST_LINK_LIBS yb_pgwrapper ql-dml-test-base pg_wrapper_test_base tools_test_utils
-    geo_transactions_test_base rocksdb_tools ${YB_MIN_TEST_LIBS})
+    geo_transactions_test_base rocksdb_tools cql_test_util ${YB_MIN_TEST_LIBS})
 ADD_YB_TEST(alter_schema_abort_txn-test)
 ADD_YB_TEST(alter_table_with_concurrent_txn-test)
 ADD_YB_TEST(colocation-test)

@@ -13,6 +13,9 @@
 
 #pragma once
 
+#include "yb/client/client.h"
+#include "yb/client/table_handle.h"
+#include "yb/tserver/pg_mutation_counter.h"
 #include "yb/tserver/stateful_services/pg_auto_analyze_service.service.h"
 #include "yb/tserver/stateful_services/stateful_service_base.h"
 
@@ -27,9 +30,15 @@ class PgAutoAnalyzeService : public StatefulRpcServiceBase<PgAutoAnalyzeServiceI
  private:
   void Activate() override;
   void Deactivate() override;
+  virtual uint32 PeriodicTaskIntervalMs() const override;
   virtual Result<bool> RunPeriodicTask() override;
+  client::YBClient& client() { return *client_future_.get(); }
+  Status UpdateMutationsSinceLastAnalyze();
 
   STATEFUL_SERVICE_IMPL_METHODS((IncreaseMutationCounters));
+
+  std::shared_future<client::YBClient*> client_future_;
+  tserver::PgMutationCounter pg_cluster_level_mutation_counter_;
 };
 
 }  // namespace stateful_service

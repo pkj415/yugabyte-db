@@ -407,8 +407,9 @@ struct PerformData {
         VLOG(2) << SessionLogPrefix(session_id) << "Failed op " << idx << ": " << status;
         return status.CloneAndAddErrorCode(OpIndex(idx));
       }
-      // In case of write operation, increase mutation counter
-      if (!op->read_only() && GetAtomicFlag(&FLAGS_ysql_enable_table_mutation_counter) &&
+      // In case of non-DDL write operations, increase mutation counters
+      if (!op->read_only() && (!req.has_options() || !req.options().ddl_mode()) &&
+          GetAtomicFlag(&FLAGS_ysql_enable_table_mutation_counter) &&
           pg_node_level_mutation_counter) {
         const auto& table_id = down_cast<const client::YBPgsqlWriteOp&>(*op).table()->id();
 

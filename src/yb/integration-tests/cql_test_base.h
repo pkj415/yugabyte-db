@@ -61,7 +61,6 @@ class CqlTestBase : public MiniClusterTestWithClient<MiniClusterType> {
 
  private:
   void SetupClusterOpt();
-  Status StartCQLServer();
 
   std::string cql_host_;
   uint16_t cql_port_ = 0;

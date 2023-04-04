@@ -17,9 +17,15 @@
 
 #include <string>
 
+#include "yb/client/client.h"
+
+#include "yb/integration-tests/mini_cluster.h"
+
 #include "yb/util/monotime.h"
 #include "yb/util/result.h"
 #include "yb/util/status_log.h"
+
+#include "yb/yql/cql/cqlserver/cql_server.h"
 
 namespace yb {
 
@@ -350,5 +356,9 @@ extern const MonoDelta kCassandraTimeOut;
 extern const std::string kCqlTestKeyspace;
 
 Result<CassandraSession> EstablishSession(CppCassandraDriver* driver);
+
+Status StartCQLServer(
+    MiniCluster* cluster_, uint16_t* cql_port, std::string& cql_host,
+    std::unique_ptr<cqlserver::CQLServer>& cql_server, client::YBClient* client);
 
 } // namespace yb

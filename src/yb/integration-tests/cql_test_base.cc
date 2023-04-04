@@ -19,8 +19,6 @@
 #include "yb/integration-tests/mini_cluster.h"
 #include "yb/integration-tests/yb_mini_cluster_test_base.h"
 
-#include "yb/rpc/messenger.h"
-
 #include "yb/tserver/heartbeater.h"
 #include "yb/tserver/mini_tablet_server.h"
 #include "yb/tserver/tablet_server.h"
@@ -58,30 +56,6 @@ void CqlTestBase<ExternalMiniCluster>::SetUp() {
 }
 
 template <>
-Status CqlTestBase<MiniCluster>::StartCQLServer() {
-  auto* mini_tserver = YBMiniClusterTestBase<MiniCluster>::cluster_->mini_tablet_server(0);
-  auto* tserver = mini_tserver->server();
-
-  const auto& tserver_options = tserver->options();
-  cqlserver::CQLServerOptions cql_server_options;
-  cql_server_options.fs_opts = tserver_options.fs_opts;
-  cql_server_options.master_addresses_flag = tserver_options.master_addresses_flag;
-  cql_server_options.SetMasterAddresses(tserver_options.GetMasterAddresses());
-
-  if (cql_port_ == 0) {
-    cql_port_ = YBMiniClusterTestBase<MiniCluster>::cluster_->AllocateFreePort();
-  }
-  cql_host_ = mini_tserver->bound_rpc_addr().address().to_string();
-  cql_server_options.rpc_opts.rpc_bind_addresses = Format("$0:$1", cql_host_, cql_port_);
-
-  cql_server_ = std::make_unique<cqlserver::CQLServer>(
-      cql_server_options,
-      &client_->messenger()->io_service(), tserver);
-
-  return cql_server_->Start();
-}
-
-template <>
 void CqlTestBase<MiniCluster>::SetUp() {
   YBMiniClusterTestBase<MiniCluster>::SetUp();
   SetupClusterOpt();
@@ -90,7 +64,7 @@ void CqlTestBase<MiniCluster>::SetUp() {
   ASSERT_OK(cluster_->Start());
   ASSERT_OK(MiniClusterTestWithClient<MiniCluster>::CreateClient());
 
-  ASSERT_OK(StartCQLServer());
+  ASSERT_OK(StartCQLServer(cluster_.get(), &cql_port_, cql_host_, cql_server_, client_.get()));
 
   driver_ = std::make_unique<CppCassandraDriver>(
       std::vector<std::string>{ cql_host_ }, cql_port_, UsePartitionAwareRouting::kTrue);
@@ -114,7 +88,7 @@ Status CqlTestBase<MiniCluster>::RestartCluster() {
   cql_server_->Shutdown();
   cql_server_.reset();
   RETURN_NOT_OK(cluster_->RestartSync());
-  return StartCQLServer();
+  return StartCQLServer(cluster_.get(), &cql_port_, cql_host_, cql_server_, client_.get());
 }
 
 template <>
@@ -127,7 +101,7 @@ void CqlTestBase<MiniCluster>::ShutdownCluster() {
 template <>
 Status CqlTestBase<MiniCluster>::StartCluster() {
   RETURN_NOT_OK(cluster_->StartSync());
-  return StartCQLServer();
+  return StartCQLServer(cluster_.get(), &cql_port_, cql_host_, cql_server_, client_.get());
 }
 
 template <>
