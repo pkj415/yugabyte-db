@@ -34,7 +34,7 @@ namespace docdb {
     ((kExternalTransactionId, 8)) \
     /* Obsolete intent prefix. Should be deleted when DBs in old format are gone. */ \
     ((kObsoleteIntentPrefix, 10)) \
-    /* We use ASCII code 13 in order to have it before all other value types which can occur in */ \
+    /* We use ASCII code 13, 0D in order to have it before all other value types which can occur in */ \
     /* key, so intents will be written in the same order as original keys for which intents are */ \
     /* written. */ \
     ((kIntentTypeSet, 13)) \
@@ -54,7 +54,7 @@ namespace docdb {
     /* key. This needs to sort before all other value types, so that a DocKey that has a prefix */ \
     /* of the sequence of components of another key sorts before the other key. kGroupEnd is */ \
     /* also used as the end marker for a frozen value. */ \
-    ((kGroupEnd, '!')) /* ASCII code 33 -- we pick the lowest code graphic character. */ \
+    ((kGroupEnd, '!')) /* ASCII code 33, 21 -- we pick the lowest code graphic character. */ \
     /* HybridTime must be lower than all other primitive types (other than kGroupEnd) so that */ \
     /* SubDocKeys that have fewer subkeys within a document sort above those that have all the */ \
     /* same subkeys and more. In our MVCC document model layout the hybrid time always appears */ \
@@ -66,37 +66,37 @@ namespace docdb {
     /* Null must be lower than the other primitive types so that it compares as smaller than */ \
     /* them. It is used for frozen CQL user-defined types (which can contain null elements) on */ \
     /* ASC columns. */ \
-    ((kNullLow, '$')) /* ASCII code 36 */ \
+    ((kNullLow, '$')) /* ASCII code 36, 24 */ \
     /* Counter to check cardinality. */ \
-    ((kCounter, '%')) /* ASCII code 37 */ \
+    ((kCounter, '%')) /* ASCII code 37, 25 */ \
     /* Forward and reverse mappings for sorted sets. */ \
-    ((kSSForward, '&')) /* ASCII code 38 */ \
-    ((kSSReverse, '\'')) /* ASCII code 39 */ \
-    ((kInetaddress, '-'))  /* ASCII code 45 */ \
-    ((kInetaddressDescending, '.'))  /* ASCII code 46 */ \
-    ((kColocationId, '0')) /* ASCII code 48 */ \
-    ((kFrozen, '<')) /* ASCII code 60 */ \
-    ((kFrozenDescending, '>')) /* ASCII code 62 */ \
-    ((kVarInt, 'B')) /* ASCII code 66 */ \
-    ((kFloat, 'C'))  /* ASCII code 67 */ \
-    ((kDouble, 'D'))  /* ASCII code 68 */ \
-    ((kDecimal, 'E'))  /* ASCII code 69 */ \
-    ((kFalse, 'F'))  /* ASCII code 70 */ \
-    ((kUInt16Hash, 'G'))  /* ASCII code 71 */ \
-    ((kInt32, 'H'))  /* ASCII code 72 */ \
-    ((kInt64, 'I'))  /* ASCII code 73 */ \
-    ((kSystemColumnId, 'J'))  /* ASCII code 74 */ \
-    ((kColumnId, 'K'))  /* ASCII code 75 */ \
-    ((kDoubleDescending, 'L'))  /* ASCII code 76 */ \
-    ((kFloatDescending, 'M')) /* ASCII code 77 */ \
-    ((kUInt32, 'O'))  /* ASCII code 79 */ \
-    ((kString, 'S'))  /* ASCII code 83 */ \
-    ((kTrue, 'T'))  /* ASCII code 84 */ \
-    ((kUInt64, 'U')) /* ASCII code 85 */ \
-    ((kExternalIntents, 'Z')) /* ASCII code 90 */ \
-    ((kArrayIndex, '['))  /* ASCII code 91 */ \
-    ((kCollString, '\\'))  /* ASCII code 92 */ \
-    ((kCollStringDescending, ']'))  /* ASCII code 93 */ \
+    ((kSSForward, '&')) /* ASCII code 38, 26 */ \
+    ((kSSReverse, '\'')) /* ASCII code 39, 27 */ \
+    ((kInetaddress, '-'))  /* ASCII code 45, 2D */ \
+    ((kInetaddressDescending, '.'))  /* ASCII code 46, 2E */ \
+    ((kColocationId, '0')) /* ASCII code 48, 30 */ \
+    ((kFrozen, '<')) /* ASCII code 60, 3C */ \
+    ((kFrozenDescending, '>')) /* ASCII code 62, 3E */ \
+    ((kVarInt, 'B')) /* ASCII code 66, 42 */ \
+    ((kFloat, 'C'))  /* ASCII code 67, 43 */ \
+    ((kDouble, 'D'))  /* ASCII code 68, 44 */ \
+    ((kDecimal, 'E'))  /* ASCII code 69, 45 */ \
+    ((kFalse, 'F'))  /* ASCII code 70, 46 */ \
+    ((kUInt16Hash, 'G'))  /* ASCII code 71, hex 47 */ \
+    ((kInt32, 'H'))  /* ASCII code 72, 48 */ \
+    ((kInt64, 'I'))  /* ASCII code 73, 49 */ \
+    ((kSystemColumnId, 'J'))  /* ASCII code 74, 4A */ \
+    ((kColumnId, 'K'))  /* ASCII code 75, 4B */ \
+    ((kDoubleDescending, 'L'))  /* ASCII code 76, 4C */ \
+    ((kFloatDescending, 'M')) /* ASCII code 77, 4D */ \
+    ((kUInt32, 'O'))  /* ASCII code 79, hex code 4F */ \
+    ((kString, 'S'))  /* ASCII code 83, hex code 53 */ \
+    ((kTrue, 'T'))  /* ASCII code 84, 54 */ \
+    ((kUInt64, 'U')) /* ASCII code 85, 55 */ \
+    ((kExternalIntents, 'Z')) /* ASCII code 90, 5A */ \
+    ((kArrayIndex, '['))  /* ASCII code 91, 5B */ \
+    ((kCollString, '\\'))  /* ASCII code 92, 5C */ \
+    ((kCollStringDescending, ']'))  /* ASCII code 93, 5D */ \
     \
     /* We allow putting a 32-bit hash in front of the document key. This hash is computed based */ \
     /* on the "hashed" components of the document key that precede "range" components. */ \
@@ -150,12 +150,12 @@ namespace docdb {
     /* Null must be lower than the other primitive types so that it compares as smaller than */ \
     /* them. It is used for frozen CQL user-defined types (which can contain null elements) on */ \
     /* ASC columns. */ \
-    ((kNullLow, '$')) /* ASCII code 36 */ \
+    ((kNullLow, '$')) /* ASCII code 36, 24 */ \
     /* Forward and reverse mappings for sorted sets. */ \
-    ((kRedisSet, '(')) /* ASCII code 40 */ \
-    ((kRedisList, ')')) /* ASCII code 41*/ \
+    ((kRedisSet, '(')) /* ASCII code 40, 28 */ \
+    ((kRedisList, ')')) /* ASCII code 41, 29 */ \
     /* This is the redis timeseries type. */ \
-    ((kRedisTS, '+')) /* ASCII code 43 */ \
+    ((kRedisTS, '+')) /* ASCII code 43, 2B */ \
     ((kRedisSortedSet, ',')) /* ASCII code 44 */ \
     ((kInetaddress, '-'))  /* ASCII code 45 */ \
     ((kColocationId, '0')) /* ASCII code 48 */ \

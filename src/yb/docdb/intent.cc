@@ -148,6 +148,7 @@ IntentTypeSet GetStrongIntentTypeSet(
   switch (level) {
     case IsolationLevel::READ_COMMITTED:
     case IsolationLevel::SNAPSHOT_ISOLATION:
+      DCHECK(operation_kind != OperationKind::kRead);
       return IntentTypeSet({IntentType::kStrongRead, IntentType::kStrongWrite});
     case IsolationLevel::SERIALIZABLE_ISOLATION:
       switch (operation_kind) {

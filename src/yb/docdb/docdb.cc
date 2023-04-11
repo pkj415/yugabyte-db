@@ -102,7 +102,10 @@ struct DetermineKeysToLockResult {
   bool need_read_snapshot;
 
   std::string ToString() const {
-    return YB_STRUCT_TO_STRING(lock_batch, need_read_snapshot);
+    auto key_transform = [](const LockBatchEntry& key) {
+      return key.ToString() + "\n";
+    };
+    return YB_STRUCT_TO_STRING(CollectionToString(lock_batch, key_transform), need_read_snapshot);
   }
 };
 
@@ -244,7 +247,7 @@ Result<PrepareDocWriteOperationResult> PrepareDocWriteOperation(
   auto determine_keys_to_lock_result = VERIFY_RESULT(DetermineKeysToLock(
       doc_write_ops, read_pairs, isolation_level, operation_kind, row_mark_type,
       transactional_table, partial_range_key_intents));
-  VLOG_WITH_FUNC(4) << "determine_keys_to_lock_result=" << determine_keys_to_lock_result.ToString();
+  LOG_WITH_FUNC(INFO) << "determine_keys_to_lock_result=" << determine_keys_to_lock_result.ToString();
   if (determine_keys_to_lock_result.lock_batch.empty() && !write_transaction_metadata) {
     LOG(ERROR) << "Empty lock batch, doc_write_ops: " << yb::ToString(doc_write_ops)
                << ", read pairs: " << AsString(read_pairs);

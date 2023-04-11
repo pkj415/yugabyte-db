@@ -551,6 +551,8 @@ Status WriteQuery::DoExecute() {
       IsolationLevel ignored_isolation_level;
       RETURN_NOT_OK(doc_op->GetDocPaths(
           docdb::GetDocPathsMode::kLock, &paths, &ignored_isolation_level));
+      LOG(INFO) << "Read pairs for serializable txn:"
+                << AsString(write_batch.read_pairs());
       for (const auto& path : paths) {
         auto key = path.as_slice();
         auto& pair = write_batch.mutable_read_pairs()->emplace_back();
