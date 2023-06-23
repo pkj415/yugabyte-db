@@ -325,8 +325,8 @@ ybcBeginForeignScan(ForeignScanState *node, int eflags)
 	if (YBReadFromFollowersEnabled()) {
 		ereport(DEBUG2, (errmsg("Doing read from followers")));
 	}
-	if (XactIsoLevel == XACT_SERIALIZABLE)
-	{
+	// if (XactIsoLevel == XACT_SERIALIZABLE)
+	// {
 		/*
 		 * In case of SERIALIZABLE isolation level we have to take predicate locks to disallow
 		 * INSERTion of new rows that satisfy the query predicate. So, we set the rowmark on all
@@ -343,7 +343,7 @@ ybcBeginForeignScan(ForeignScanState *node, int eflags)
 			}
 			break;
 		}
-	}
+	// }
 
 	ybc_state->is_exec_done = false;
 

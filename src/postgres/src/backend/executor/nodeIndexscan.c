@@ -148,8 +148,8 @@ IndexNext(IndexScanState *node)
 		scandesc->yb_exec_params->rowmark = -1;
 
 		// Add row marks.
-		if (XactIsoLevel == XACT_SERIALIZABLE)
-		{
+		// if (XactIsoLevel == XACT_SERIALIZABLE)
+		// {
 			/*
 			 * In case of SERIALIZABLE isolation level we have to take predicate locks to disallow
 			 * INSERTion of new rows that satisfy the query predicate. So, we set the rowmark on all
@@ -167,7 +167,7 @@ IndexNext(IndexScanState *node)
 				}
 				break;
 			}
-		}
+		// }
 	}
 
 	/*
