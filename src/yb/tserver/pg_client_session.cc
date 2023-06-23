@@ -519,7 +519,7 @@ struct SharedExchangeQuery : public SharedExchangeQueryParams, public PerformDat
 client::YBSessionPtr CreateSession(
     client::YBClient* client, const scoped_refptr<ClockBase>& clock) {
   auto result = std::make_shared<client::YBSession>(client, clock);
-  result->SetForceConsistentRead(client::ForceConsistentRead::kTrue);
+  result->SetForceConsistentRead(client::ForceConsistentRead::kFalse);
   result->set_allow_local_calls_in_curr_thread(false);
   return result;
 }
