@@ -331,11 +331,18 @@ Status ReadQuery::DoPerform() {
   require_lease_ = tablet::RequireLease(req_->consistency_level() == YBConsistencyLevel::STRONG);
   // TODO: should check all the tables referenced by the requests to decide if it is transactional.
   const bool transactional = this->transactional();
+
   // Should not pick read time for serializable isolation, since it is picked after read intents
   // are added. Also conflict resolution for serializable isolation should be done without read time
   // specified. So we use max hybrid time for conflict resolution in such case.
   // It was implemented as part of #655.
-  if (!serializable_isolation) {
+  //
+  // Simialrly, for explicit row locking, if no read time is specified by the query layer, we can
+  // avoid picking one before conflict resolution. Instead we can pick on while reading i.e., after
+  // writing intents. This helps in Wait-on-Conflict concnurrency control mode by allowing
+  // re-running of conflict resolution on the tserver once the waiting transaction exits a wait
+  // queue, instead of throwing a kConflict error.
+  if (!serializable_isolation && !has_row_mark) {
     RETURN_NOT_OK(PickReadTime(server_.Clock()));
   }
 
