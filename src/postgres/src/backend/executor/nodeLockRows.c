@@ -80,7 +80,7 @@ lnext:
 				 errmsg("Mixing Yugabyte relations and not Yugabyte relations with "
 						"row locks is not supported")));
 
-	if (n_yb_relations > 0 && XactIsoLevel == XACT_SERIALIZABLE) {
+	if (n_yb_relations > 0) {
 		/*
 		 * For YB relations, we don't lock tuples using this node in SERIALIZABLE level. Instead we take
 		 * predicate locks by setting the row mark in read requests sent to txn participants.
