@@ -994,15 +994,20 @@ Result<PgClientSession::UsedReadTimePtr> PgClientSession::ProcessReadTimeManipul
   switch (manipulation) {
     case ReadTimeManipulation::RESET: {
         auto* read_point = Session(PgClientSessionKind::kPlain)->read_point();
-        if (FLAGS_ysql_rc_force_pick_read_time_on_pg_client ||
-            Transaction(PgClientSessionKind::kPlain)) {
+        if (FLAGS_ysql_rc_force_pick_read_time_on_pg_client) {
           // If a txn_ has been created, session_->read_point() returns the read point stored in
           // txn_.
           read_point->SetCurrentReadTime();
           VLOG(1) << "Setting current ht as read point " << read_point->GetReadTime();
           return PgClientSession::UsedReadTimePtr();
+        } else if (Transaction(PgClientSessionKind::kPlain)) {
+          // Reset the transaction read point to let the tserver pick the read point.
+          Transaction(PgClientSessionKind::kPlain)->read_point().SetReadTime(
+              ReadHybridTime(), {} /* local_limits */);
+          return PgClientSession::UsedReadTimePtr();
+        } else {
+          return VERIFY_RESULT(ResetReadPoint(PgClientSessionKind::kPlain));
         }
-        return VERIFY_RESULT(ResetReadPoint(PgClientSessionKind::kPlain));
       }
     case ReadTimeManipulation::RESTART: {
         auto* rp = Session(PgClientSessionKind::kPlain)->read_point();

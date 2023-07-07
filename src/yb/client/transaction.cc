@@ -419,7 +419,7 @@ class YBTransaction::Impl final : public internal::TxnBatcherIf {
       // snapshot.
       // For snapshot isolation, if read time was not yet picked, we have to choose it now, if
       // there multiple tablets that will process first request.
-      SetReadTimeIfNeeded(ops_info->groups.size() > 1 || force_consistent_read);
+      SetReadTimeIfNeeded(ops_info->groups.size() > 1); // || force_consistent_read
     }
 
     {
