@@ -248,7 +248,7 @@ Status ProcessUsedReadTime(uint64_t session_id,
       std::lock_guard guard(used_read_time.lock);
       if (PREDICT_FALSE(static_cast<bool>(used_read_time.value))) {
         return STATUS_FORMAT(IllegalState,
-                             "Session read time already set $0 used read time is $1",
+                             "Used read time already set $0 received new used read time is $1",
                              used_read_time.value,
                              read_op.used_read_time());
       }
@@ -519,7 +519,6 @@ struct SharedExchangeQuery : public SharedExchangeQueryParams, public PerformDat
 client::YBSessionPtr CreateSession(
     client::YBClient* client, const scoped_refptr<ClockBase>& clock) {
   auto result = std::make_shared<client::YBSession>(client, clock);
-  result->SetForceConsistentRead(client::ForceConsistentRead::kTrue);
   result->set_allow_local_calls_in_curr_thread(false);
   return result;
 }
@@ -995,15 +994,22 @@ Result<PgClientSession::UsedReadTimePtr> PgClientSession::ProcessReadTimeManipul
   switch (manipulation) {
     case ReadTimeManipulation::RESET: {
         auto* read_point = Session(PgClientSessionKind::kPlain)->read_point();
-        if (FLAGS_ysql_rc_force_pick_read_time_on_pg_client ||
-            Transaction(PgClientSessionKind::kPlain)) {
+        if (FLAGS_ysql_rc_force_pick_read_time_on_pg_client) {
           // If a txn_ has been created, session_->read_point() returns the read point stored in
           // txn_.
           read_point->SetCurrentReadTime();
           VLOG(1) << "Setting current ht as read point " << read_point->GetReadTime();
           return PgClientSession::UsedReadTimePtr();
+        } else if (Transaction(PgClientSessionKind::kPlain)) {
+          // Reset the transaction read point to let the tserver pick the read point.
+          Transaction(PgClientSessionKind::kPlain)->read_point().SetReadTime(
+              ReadHybridTime(), {} /* local_limits */);
+          VLOG(1) << "Reset read point in distributed txn";
+          return PgClientSession::UsedReadTimePtr();
+        } else {
+          VLOG(1) << "Reset read point (distributed txn not yet started)";
+          return VERIFY_RESULT(ResetReadPoint(PgClientSessionKind::kPlain));
         }
-        return VERIFY_RESULT(ResetReadPoint(PgClientSessionKind::kPlain));
       }
     case ReadTimeManipulation::RESTART: {
         auto* rp = Session(PgClientSessionKind::kPlain)->read_point();
@@ -1191,7 +1197,14 @@ Status PgClientSession::BeginTransactionIfNecessary(
   const auto isolation = static_cast<IsolationLevel>(options.isolation());
 
   auto priority = options.priority();
-  auto& session = EnsureSession(PgClientSessionKind::kPlain);
+  LOG(INFO) << "Piyush - options.force_consistent_read_time_for_pipeline_of_ops()="
+            << options.force_consistent_read_time_for_pipeline_of_ops()
+            << ", options.has_read_time()=" << options.has_read_time();
+  auto& session = EnsureSession(
+      PgClientSessionKind::kPlain,
+      /* force_consistent_read */
+      client::ForceConsistentRead(
+          options.force_consistent_read_time_for_pipeline_of_ops() || options.has_read_time()));
   auto& txn = Transaction(PgClientSessionKind::kPlain);
   if (txn && txn_serial_no_ != options.txn_serial_no()) {
     VLOG_WITH_PREFIX(2)
@@ -1599,11 +1612,13 @@ Status PgClientSession::DeleteDBSequences(
   return session->TEST_ApplyAndFlush(std::move(psql_delete));
 }
 
-client::YBSessionPtr& PgClientSession::EnsureSession(PgClientSessionKind kind) {
+client::YBSessionPtr& PgClientSession::EnsureSession(
+    PgClientSessionKind kind, client::ForceConsistentRead force_consistent_read) {
   auto& session = Session(kind);
   if (!session) {
     session = CreateSession(&client_, clock_);
   }
+  session->SetForceConsistentRead(force_consistent_read);
   return session;
 }
 

@@ -416,7 +416,7 @@ std::string PgTxnManager::TxnStateDebugStr() const {
       isolation_level);
 }
 
-uint64_t PgTxnManager::SetupPerformOptions(tserver::PgPerformOptionsPB* options) {
+void PgTxnManager::SetupPerformOptions(tserver::PgPerformOptionsPB* options) {
   if (!IsDdlMode() && !txn_in_progress_) {
     ++txn_serial_no_;
     active_sub_transaction_id_ = 0;
@@ -451,7 +451,6 @@ uint64_t PgTxnManager::SetupPerformOptions(tserver::PgPerformOptionsPB* options)
     ReadHybridTime::SingleTime(read_time_for_follower_reads_).ToPB(options->mutable_read_time());
     options->set_read_from_followers(true);
   }
-  return txn_serial_no_;
 }
 
 double PgTxnManager::GetTransactionPriority() const {

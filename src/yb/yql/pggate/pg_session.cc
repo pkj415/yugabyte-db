@@ -259,7 +259,8 @@ class PgSession::RunHelper {
     // can never occur).
 
     VLOG(2) << "Apply " << (op->is_read() ? "read" : "write") << " op, table name: "
-            << table.table_name().table_name() << ", table id: " << table.id();
+            << table.table_name().table_name() << ", table id: " << table.id()
+            << ", force_non_bufferable: " << force_non_bufferable;
     auto& buffer = pg_session_.buffer_;
 
     // Try buffering this operation if it is a write operation, buffering is enabled and no
@@ -663,7 +664,8 @@ Result<PerformFuture> PgSession::FlushOperations(BufferableOperations ops, bool 
   // multiple bunch of operations in parallel). As a result PgClientService is unable to use read
   // time from remote t-server or generate its own.
   return Perform(
-      std::move(ops), {.ensure_read_time_is_set = EnsureReadTimeIsSet(!transactional)});
+      std::move(ops),
+      {.force_consistent_read_time_for_pipeline_of_ops = ForceConsistentReadTimeForPipelineOfOps(true)});
 }
 
 Result<PerformFuture> PgSession::Perform(BufferableOperations&& ops, PerformOptions&& ops_options) {
@@ -675,7 +677,7 @@ Result<PerformFuture> PgSession::Perform(BufferableOperations&& ops, PerformOpti
     }
     options.set_use_catalog_session(true);
   } else {
-    const auto txn_serial_no = pg_txn_manager_->SetupPerformOptions(&options);
+    pg_txn_manager_->SetupPerformOptions(&options);
     if (pg_txn_manager_->IsTxnInProgress()) {
       options.mutable_in_txn_limit_ht()->set_value(ops_options.in_txn_limit.ToUint64());
     }
@@ -683,7 +685,8 @@ Result<PerformFuture> PgSession::Perform(BufferableOperations&& ops, PerformOpti
     if (ops_read_time) {
       RETURN_NOT_OK(UpdateReadTime(&options, ops_read_time));
     }
-    ProcessPerformOnTxnSerialNo(txn_serial_no, ops_options.ensure_read_time_is_set, &options);
+    ProcessPerformOnTxnSerialNo(
+        ops_options.force_consistent_read_time_for_pipeline_of_ops, &options);
   }
   bool global_transaction = yb_force_global_transaction;
   for (auto i = ops.operations.begin(); !global_transaction && i != ops.operations.end(); ++i) {
@@ -756,20 +759,10 @@ Result<PerformFuture> PgSession::Perform(BufferableOperations&& ops, PerformOpti
 }
 
 void PgSession::ProcessPerformOnTxnSerialNo(
-    uint64_t txn_serial_no,
-    EnsureReadTimeIsSet ensure_read_time_set_for_current_txn_serial_no,
+    ForceConsistentReadTimeForPipelineOfOps force_consistent_read_time_for_pipeline_of_ops,
     tserver::PgPerformOptionsPB* options) {
-  if (txn_serial_no != std::get<0>(last_perform_on_txn_serial_no_).txn_serial_no) {
-    last_perform_on_txn_serial_no_.emplace<0>(
-        txn_serial_no,
-        ensure_read_time_set_for_current_txn_serial_no
-            ? ReadHybridTime::FromHybridTimeRange(clock_->NowRange())
-            : ReadHybridTime());
-  }
-  const auto& read_time = std::get<0>(last_perform_on_txn_serial_no_).read_time;
-  if (ensure_read_time_set_for_current_txn_serial_no && read_time && !options->has_read_time()) {
-    read_time.ToPB(options->mutable_read_time());
-  }
+  options->set_force_consistent_read_time_for_pipeline_of_ops(
+      force_consistent_read_time_for_pipeline_of_ops);
   options->set_trace_requested(pg_txn_manager_->ShouldEnableTracing());
 }
 

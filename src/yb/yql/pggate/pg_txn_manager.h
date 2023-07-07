@@ -75,7 +75,7 @@ class PgTxnManager : public RefCountedThreadSafe<PgTxnManager> {
   bool IsDdlMode() const { return ddl_type_ != DdlType::NonDdl; }
   bool ShouldEnableTracing() const { return enable_tracing_; }
 
-  uint64_t SetupPerformOptions(tserver::PgPerformOptionsPB* options);
+  void SetupPerformOptions(tserver::PgPerformOptionsPB* options);
 
   double GetTransactionPriority() const;
   TxnPriorityRequirement GetTransactionPriorityType() const;

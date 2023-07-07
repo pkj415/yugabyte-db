@@ -438,6 +438,7 @@ message PgPerformOptionsPB {
   CachingInfoPB caching_info = 17;
   bool read_from_followers = 18;
   bool trace_requested = 19;
+  bool force_consistent_read_time_for_pipeline_of_ops = 20; // [default = false] implicit in proto3
 }
 
 message PgPerformRequestPB {

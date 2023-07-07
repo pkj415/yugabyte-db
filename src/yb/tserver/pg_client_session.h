@@ -136,7 +136,9 @@ class PgClientSession : public std::enable_shared_from_this<PgClientSession> {
       ReadTimeManipulation manipulation);
 
   client::YBClient& client();
-  client::YBSessionPtr& EnsureSession(PgClientSessionKind kind);
+  client::YBSessionPtr& EnsureSession(
+      PgClientSessionKind kind,
+      client::ForceConsistentRead force_consistent_read = client::ForceConsistentRead::kTrue);
   client::YBSessionPtr& Session(PgClientSessionKind kind);
   client::YBTransactionPtr& Transaction(PgClientSessionKind kind);
   Status CheckPlainSessionReadTime();

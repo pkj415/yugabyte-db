@@ -50,7 +50,7 @@ namespace pggate {
 YB_STRONGLY_TYPED_BOOL(OpBuffered);
 YB_STRONGLY_TYPED_BOOL(InvalidateOnPgClient);
 YB_STRONGLY_TYPED_BOOL(UseCatalogSession);
-YB_STRONGLY_TYPED_BOOL(EnsureReadTimeIsSet);
+YB_STRONGLY_TYPED_BOOL(ForceConsistentReadTimeForPipelineOfOps);
 YB_STRONGLY_TYPED_BOOL(ForceNonBufferable);
 
 class PgTxnManager;
@@ -371,7 +371,7 @@ class PgSession : public RefCountedThreadSafe<PgSession> {
 
   struct PerformOptions {
     UseCatalogSession use_catalog_session = UseCatalogSession::kFalse;
-    EnsureReadTimeIsSet ensure_read_time_is_set = EnsureReadTimeIsSet::kFalse;
+    ForceConsistentReadTimeForPipelineOfOps force_consistent_read_time_for_pipeline_of_ops = ForceConsistentReadTimeForPipelineOfOps::kFalse;
     std::optional<CacheOptions> cache_options = std::nullopt;
     HybridTime in_txn_limit = {};
   };
@@ -379,25 +379,13 @@ class PgSession : public RefCountedThreadSafe<PgSession> {
   Result<PerformFuture> Perform(BufferableOperations&& ops, PerformOptions&& options);
 
   void ProcessPerformOnTxnSerialNo(
-      uint64_t txn_serial_no,
-      EnsureReadTimeIsSet force_set_read_time_for_current_txn_serial_no,
+      ForceConsistentReadTimeForPipelineOfOps force_consistent_read_time_for_pipeline_of_ops,
       tserver::PgPerformOptionsPB* options);
 
   template<class Generator>
   Result<PerformFuture> DoRunAsync(
       const Generator& generator, HybridTime in_txn_limit, ForceNonBufferable force_non_bufferable,
       std::optional<CacheOptions>&& cache_options = std::nullopt);
-
-  struct TxnSerialNoPerformInfo {
-    TxnSerialNoPerformInfo() : TxnSerialNoPerformInfo(0, ReadHybridTime()) {}
-
-    TxnSerialNoPerformInfo(uint64_t txn_serial_no_, const ReadHybridTime& read_time_)
-        : txn_serial_no(txn_serial_no_), read_time(read_time_) {
-    }
-
-    const uint64_t txn_serial_no;
-    const ReadHybridTime read_time;
-  };
 
   PgClient& pg_client_;
 
@@ -431,7 +419,6 @@ class PgSession : public RefCountedThreadSafe<PgSession> {
 
   const YBCPgCallbacks& pg_callbacks_;
   bool has_write_ops_in_ddl_mode_ = false;
-  std::variant<TxnSerialNoPerformInfo> last_perform_on_txn_serial_no_;
 };
 
 }  // namespace pggate
