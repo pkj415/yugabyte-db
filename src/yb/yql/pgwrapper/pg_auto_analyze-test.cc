@@ -41,6 +41,7 @@ DECLARE_bool(ysql_enable_table_mutation_counter);
 DECLARE_bool(ysql_enable_auto_analyze_service);
 DECLARE_uint64(ysql_node_level_mutation_reporting_interval_ms);
 DECLARE_uint32(ysql_cluster_level_mutation_persist_interval_ms);
+DECLARE_string(vmodule);
 
 using namespace std::chrono_literals;
 
@@ -60,6 +61,7 @@ namespace {
 class PgAutoAnalyzeTest : public PgMiniTestBase {
  protected:
   void SetUp() override {
+    CHECK_OK(SET_FLAG(vmodule, "pg_auto_analyze_service=5,pg_table_mutation_count_sender=5"));
     ANNOTATE_UNPROTECTED_WRITE(FLAGS_ysql_enable_table_mutation_counter) = true;
 
     // Set low values for the node level mutation reporting and the cluster level persisting
