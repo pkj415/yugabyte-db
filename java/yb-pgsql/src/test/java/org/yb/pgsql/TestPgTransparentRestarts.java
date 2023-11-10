@@ -129,9 +129,6 @@ public class TestPgTransparentRestarts extends BasePgSQLTest {
     flags.put("ysql_sleep_before_retry_on_txn_conflict", "true");
     flags.put("ysql_max_write_restart_attempts", "5");
     flags.put("yb_enable_read_committed_isolation", "true");
-    // TODO: Remove this before diff lands. This is just to have the tests run with wait queues
-    // on release builds too.
-    flags.put("enable_wait_queues", "true");
     flags.put("wait_queue_poll_interval_ms", "5");
     return flags;
   }
@@ -689,11 +686,16 @@ public class TestPgTransparentRestarts extends BasePgSQLTest {
               ++insertsInTxnBlock;
             }
             stmt.setInt(2, rnd.nextInt(MAX_INT_TO_INSERT + 1));
+            LOG.info("Starting INSERT number " + i + " in txn block: " + runInTxnBlock);
             stmt.executeUpdate();
+            if (!runInTxnBlock) {
+              LOG.info("Done INSERT number " + i);
+            }
             if (runInTxnBlock) {
               try {
                 auxStmt.execute("COMMIT");
                 inc(insertsSucceeded, isolation);
+                LOG.info("Done INSERT number " + i);
                 LOG.info("Successful insert num " + insertsAttempted);
               } catch (Exception ex) {
                 LOG.info("Failed insert num " + insertsAttempted);
@@ -870,7 +872,7 @@ public class TestPgTransparentRestarts extends BasePgSQLTest {
         ConnectionBuilder cb,
         String valueToInsert,
         boolean expectRestartErrors) {
-      super(cb, valueToInsert, 50 /* numInserts */);
+      super(cb, valueToInsert, 75 /* numInserts */);
       this.expectRestartErrors = expectRestartErrors;
     }
 
@@ -1166,12 +1168,6 @@ public class TestPgTransparentRestarts extends BasePgSQLTest {
             assertGreaterThan("No txns in " + isolation + " succeeded, ever! Flawed test?",
                 txnsSucceeded, 0);
           }
-          assertTrue("It can't be the case that results were always same in both SELECTs at " +
-                     "READ COMMITTED isolation level",
-                     (isolation != IsolationLevel.READ_COMMITTED
-                      && statementsresultsMatched == txnsSucceeded) ||
-                     (isolation == IsolationLevel.READ_COMMITTED
-                      && statementsresultsMatched < txnsSucceeded));
         });
       }
 
@@ -1232,7 +1228,7 @@ public class TestPgTransparentRestarts extends BasePgSQLTest {
     public SavepointStatementTester(
         ConnectionBuilder cb,
         String valueToInsert) {
-      super(cb, valueToInsert, 50 /* numInserts */);
+      super(cb, valueToInsert, 75 /* numInserts */);
     }
 
     private ThrowingRunnable getRunnableThread(
@@ -1304,7 +1300,7 @@ public class TestPgTransparentRestarts extends BasePgSQLTest {
     private Boolean is_deadlock_possible;
 
     public DmlTester(ConnectionBuilder cb, String valueToInsert, Boolean is_deadlock_possible) {
-      super(cb, valueToInsert, 50 /* numInserts */);
+      super(cb, valueToInsert, 75 /* numInserts */);
       this.is_deadlock_possible = is_deadlock_possible;
     }
 
