@@ -3022,6 +3022,17 @@ static struct config_bool ConfigureNamesBool[] =
 		NULL, NULL, NULL
 	},
 
+	{
+		{"yb_enable_advisory_lock", PGC_USERSET, LOCK_MANAGEMENT,
+			gettext_noop("Enable advisory lock feature"),
+			NULL,
+			GUC_NOT_IN_SAMPLE
+		},
+		&yb_enable_advisory_lock,
+		false,
+		NULL, NULL, NULL
+	},
+
 	/* End-of-list marker */
 	{
 		{NULL, 0, 0, NULL, NULL}, NULL, false, NULL, NULL, NULL

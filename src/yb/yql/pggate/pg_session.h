@@ -291,6 +291,11 @@ class PgSession : public RefCountedThreadSafe<PgSession> {
   Status SetCronLastMinute(int64_t last_minute);
   Result<int64_t> GetCronLastMinute();
 
+  Status AcquireAdvisoryLock(
+      const YBAdvisoryLockId& lock_id, YBAdvisoryLockMode mode, bool wait, bool session);
+  Status ReleaseAdvisoryLock(const YBAdvisoryLockId& lock_id, YBAdvisoryLockMode mode);
+  Status ReleaseAllAdvisoryLocks(uint32_t db_oid);
+
  private:
   Result<PgTableDescPtr> DoLoadTable(
       const PgObjectId& table_id, bool fail_on_cache_hit,

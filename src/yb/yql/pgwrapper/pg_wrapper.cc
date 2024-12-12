@@ -318,6 +318,9 @@ DEFINE_NON_RUNTIME_string(ysql_cron_database_name, "yugabyte",
 DEFINE_NON_RUNTIME_bool(ysql_trust_local_yugabyte_connections, true,
             "Trust YSQL connections via the local socket from the yugabyte user.");
 
+DEFINE_RUNTIME_PG_PREVIEW_FLAG(bool, yb_enable_advisory_lock, false,
+                               "Whether to enable yb advisory lock feature at PG.");
+
 DECLARE_bool(enable_pg_cron);
 
 using gflags::CommandLineFlagInfo;

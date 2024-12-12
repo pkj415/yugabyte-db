@@ -101,6 +101,8 @@ class TserverXClusterContextIf;
 // PG_CLIENT_SESSION_ASYNC_METHODS).
 #define YB_PG_CLIENT_ASYNC_METHODS \
     (GetTableKeyRanges) \
+    (AcquireAdvisoryLock) \
+    (ReleaseAdvisoryLock) \
     /**/
 
 class PgClientServiceImpl : public PgClientServiceIf {

@@ -2240,4 +2240,21 @@ Status PgApiImpl::RestoreReadTimePoint(uint64_t read_time_point_handle) {
   return pg_txn_manager_->RestoreReadTimePoint(read_time_point_handle);
 }
 
+//------------------------------------------------------------------------------------------------
+// Advisory Locks.
+//------------------------------------------------------------------------------------------------
+
+Status PgApiImpl::AcquireAdvisoryLock(
+      const YBAdvisoryLockId& lock_id, YBAdvisoryLockMode mode, bool wait, bool session) {
+  return pg_session_->AcquireAdvisoryLock(lock_id, mode, wait, session);
+}
+
+Status PgApiImpl::ReleaseAdvisoryLock(const YBAdvisoryLockId& lock_id, YBAdvisoryLockMode mode) {
+  return pg_session_->ReleaseAdvisoryLock(lock_id, mode);
+}
+
+Status PgApiImpl::ReleaseAllAdvisoryLocks(uint32_t db_oid) {
+  return pg_session_->ReleaseAllAdvisoryLocks(db_oid);
+}
+
 } // namespace yb::pggate

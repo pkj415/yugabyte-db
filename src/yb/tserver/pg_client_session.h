@@ -95,6 +95,8 @@ class TserverXClusterContextIf;
 // response with error status and call context.RespondSuccess.
 #define PG_CLIENT_SESSION_ASYNC_METHODS \
     (GetTableKeyRanges) \
+    (AcquireAdvisoryLock) \
+    (ReleaseAdvisoryLock) \
     /**/
 
 using PgClientSessionOperations = std::vector<std::shared_ptr<client::YBPgsqlOp>>;
@@ -142,7 +144,8 @@ class PgClientSession {
   using UsedReadTimeApplier = std::function<void(ReadTimeData&&)>;
 
   PgClientSession(
-      TransactionBuilder&& transaction_builder, SharedThisSource shared_this_source, uint64_t id,
+      TransactionBuilder&& transaction_builder, YsqlAdvisoryLocksTable& advisory_locks_table,
+      SharedThisSource shared_this_source, uint64_t id,
       client::YBClient* client, const scoped_refptr<ClockBase>& clock, PgTableCache* table_cache,
       const TserverXClusterContextIf* xcluster_context,
       PgMutationCounter* pg_node_level_mutation_counter, PgResponseCache* response_cache,
@@ -199,7 +202,7 @@ class PgClientSession {
       client::YBSession* session, client::YBTransaction* transaction);
 
   Result<SetupSessionResult> SetupSession(
-      const PgPerformRequestPB& req, CoarseTimePoint deadline, HybridTime in_txn_limit);
+      const PgPerformOptionsPB& options, CoarseTimePoint deadline, HybridTime in_txn_limit);
   Status ProcessResponse(
       const PgClientSessionOperations& operations, const PgPerformRequestPB& req,
       PgPerformResponsePB* resp, rpc::RpcContext* context);
@@ -316,6 +319,7 @@ class PgClientSession {
   client::YBClient& client_;
   scoped_refptr<ClockBase> clock_;
   const TransactionBuilder transaction_builder_;
+  YsqlAdvisoryLocksTable& advisory_locks_table_;
   PgTableCache& table_cache_;
   const TserverXClusterContextIf* xcluster_context_;
   PgMutationCounter* pg_node_level_mutation_counter_;

@@ -821,6 +821,15 @@ class PgApiImpl {
   [[nodiscard]] uint64_t GetCurrentReadTimePoint() const;
   Status RestoreReadTimePoint(uint64_t read_time_point_handle);
 
+  //----------------------------------------------------------------------------------------------
+  // Advisory Locks.
+  //----------------------------------------------------------------------------------------------
+
+  Status AcquireAdvisoryLock(
+      const YBAdvisoryLockId& lock_id, YBAdvisoryLockMode mode, bool wait, bool session);
+  Status ReleaseAdvisoryLock(const YBAdvisoryLockId& lock_id, YBAdvisoryLockMode mode);
+  Status ReleaseAllAdvisoryLocks(uint32_t db_oid);
+
  private:
   void ClearSessionState();
 

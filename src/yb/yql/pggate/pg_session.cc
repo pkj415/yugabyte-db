@@ -1094,4 +1094,49 @@ Status PgSession::SetCronLastMinute(int64_t last_minute) {
 
 Result<int64_t> PgSession::GetCronLastMinute() { return pg_client_.GetCronLastMinute(); }
 
+Status PgSession::AcquireAdvisoryLock(
+    const YBAdvisoryLockId& lock_id, YBAdvisoryLockMode mode, bool wait, bool session) {
+  tserver::PgPerformOptionsPB options;
+
+  RETURN_NOT_OK(pg_txn_manager_->CalculateIsolation(false /* read_only */, kLowerPriorityRange));
+  pg_txn_manager_->SetupPerformOptions(&options, EnsureReadTimeIsSet::kFalse);
+  options.set_force_global_transaction(true);
+
+  tserver::PgAcquireAdvisoryLockRequestPB req;
+  req.set_session_id(pg_client_.SessionID());
+  req.set_db_oid(lock_id.database_id);
+  auto* lock = req.add_locks();
+  lock->mutable_lock_id()->set_classid(lock_id.classid);
+  lock->mutable_lock_id()->set_objid(lock_id.objid);
+  lock->mutable_lock_id()->set_objsubid(lock_id.objsubid);
+  lock->set_lock_mode(mode == YBAdvisoryLockMode::YB_ADVISORY_LOCK_EXCLUSIVE
+      ? tserver::AdvisoryLockMode::LOCK_EXCLUSIVE
+      : tserver::AdvisoryLockMode::LOCK_SHARE);
+  req.set_wait(wait);
+  req.set_session(session);
+  *req.mutable_options() = std::move(options);
+  return pg_client_.AcquireAdvisoryLock(&req, CoarseTimePoint());
+}
+
+Status PgSession::ReleaseAdvisoryLock(const YBAdvisoryLockId& lock_id, YBAdvisoryLockMode mode) {
+  tserver::PgReleaseAdvisoryLockRequestPB req;
+  req.set_session_id(pg_client_.SessionID());
+  req.set_db_oid(lock_id.database_id);
+  auto* lock = req.add_locks();
+  lock->mutable_lock_id()->set_classid(lock_id.classid);
+  lock->mutable_lock_id()->set_objid(lock_id.objid);
+  lock->mutable_lock_id()->set_objsubid(lock_id.objsubid);
+  lock->set_lock_mode(mode == YBAdvisoryLockMode::YB_ADVISORY_LOCK_EXCLUSIVE
+      ? tserver::AdvisoryLockMode::LOCK_EXCLUSIVE
+      : tserver::AdvisoryLockMode::LOCK_SHARE);
+  return pg_client_.ReleaseAdvisoryLock(&req, CoarseTimePoint());
+}
+
+Status PgSession::ReleaseAllAdvisoryLocks(uint32_t db_oid) {
+  tserver::PgReleaseAdvisoryLockRequestPB req;
+  req.set_session_id(pg_client_.SessionID());
+  req.set_db_oid(db_oid);
+  return pg_client_.ReleaseAdvisoryLock(&req, CoarseTimePoint());
+}
+
 }  // namespace yb::pggate

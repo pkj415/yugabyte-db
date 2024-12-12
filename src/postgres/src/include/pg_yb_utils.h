@@ -711,6 +711,11 @@ extern bool yb_use_hash_splitting_by_default;
  */
 extern bool yb_enable_inplace_index_update;
 
+/*
+ * Enable the advisory lock feature.
+ */
+extern bool yb_enable_advisory_lock;
+
 typedef struct YBUpdateOptimizationOptions
 {
 	bool has_infra;

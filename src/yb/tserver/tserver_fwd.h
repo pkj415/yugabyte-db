@@ -23,6 +23,8 @@
 
 namespace yb {
 
+class YsqlAdvisoryLocksTable;
+
 namespace client {
 
 class TransactionPool;
