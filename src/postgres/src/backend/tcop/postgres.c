@@ -86,6 +86,8 @@
 /* YB includes */
 #include "catalog/yb_catalog_version.h"
 #include "commands/portalcmds.h"
+#include "commands/trigger.h"
+#include "executor/spi.h"
 #include "libpq/auth.h"
 #include "libpq/yb_pqcomm_extensions.h"
 #include "pg_yb_utils.h"
@@ -5393,7 +5395,16 @@ yb_restart_transaction(int attempt, bool is_read_restart)
 	 * either case to avoid checking/tracking if a write could have been
 	 * performed.
 	 */
-	YBCRestartWriteTransaction();
+	{
+		AtEOXact_SPI(false /* isCommit */ );
+
+		/*
+		 * Recreate the global state present for triggers that would have changed
+		 * during the execution of the failed write.
+		 */
+		AfterTriggerEndXact(false /* isCommit */ );
+		AfterTriggerBeginXact();
+	}
 
 	if (is_read_restart)
 	{
@@ -5401,6 +5412,12 @@ yb_restart_transaction(int attempt, bool is_read_restart)
 	}
 	else
 	{
+		/*
+		 * Clear the snapshots. This is important because we want to use a later snapshot when retrying
+		 * the query/ transaction.
+		 */
+		YBResetSnapshotsForRetry();
+
 		/*
 		 * Retry the transaction by recreating the YB state for the transaction without
 		 * changing/ resetting the Pg-side transaction. This call preserves the priority of the current

@@ -2224,6 +2224,16 @@ GetSnapshotDataInitOldSnapshot(Snapshot snapshot)
 static bool
 GetSnapshotDataReuse(Snapshot snapshot)
 {
+	/*
+	 * YB: It isn't possible to determine if a snapshot can be reused because YB
+	 * uses read time for a snapshot unlike PG which maintains a process array
+	 * (procarray).
+	 */
+	if (IsYugaByteEnabled())
+	{
+		return false;
+	}
+
 	uint64		curXactCompletionCount;
 
 	Assert(LWLockHeldByMe(ProcArrayLock));
@@ -2268,7 +2278,6 @@ GetSnapshotDataReuse(Snapshot snapshot)
 
 	GetSnapshotDataInitOldSnapshot(snapshot);
 
-	snapshot->yb_read_point_handle = YbBuildCurrentReadPointHandle();
 	return true;
 }
 
@@ -2656,7 +2665,9 @@ GetSnapshotData(Snapshot snapshot)
 
 	GetSnapshotDataInitOldSnapshot(snapshot);
 
-	snapshot->yb_read_point_handle = YbBuildCurrentReadPointHandle();
+	snapshot->yb_read_point_handle = YbCreateNewSnapshot();
+	elog(DEBUG2, "Fetched new snapshot, yb_read_point_handle.has_value: %d, yb_read_point_handle.value: %lu",
+		snapshot->yb_read_point_handle.has_value, snapshot->yb_read_point_handle.value);
 	return snapshot;
 }
 

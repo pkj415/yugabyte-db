@@ -1358,7 +1358,7 @@ extern bool YbIsReadCommittedTxn();
 extern YbOptionalReadPointHandle YbBuildCurrentReadPointHandle();
 extern void YbUseSnapshotReadTime(uint64_t read_time);
 extern YbOptionalReadPointHandle YbRegisterSnapshotReadTime(uint64_t read_time);
-
+extern YbOptionalReadPointHandle YbCreateNewSnapshot();
 
 extern bool YbUseFastBackwardScan();
 

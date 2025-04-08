@@ -7510,12 +7510,16 @@ YbCalculateTimeDifferenceInMicros(TimestampTz yb_start_time)
 	return secs * USECS_PER_SEC + microsecs;
 }
 
+static bool
+YbIsDDLOrInitDBMode()
+{
+	return YBCPgIsDdlMode() || YBCIsInitDbModeEnvVarSet();
+}
+
 bool
 YbIsReadCommittedTxn()
 {
-	return IsYBReadCommitted() &&
-		!((YBCPgIsDdlMode() && !YBIsDdlTransactionBlockEnabled()) ||
-		  YBCIsInitDbModeEnvVarSet());
+	return IsYBReadCommitted() && !YbIsDDLOrInitDBMode();
 }
 
 static YbOptionalReadPointHandle
@@ -7530,7 +7534,14 @@ YbMakeReadPointHandle(YbcReadPointHandle read_point)
 YbOptionalReadPointHandle
 YbBuildCurrentReadPointHandle()
 {
-	return YbIsReadCommittedTxn()
+	/*
+	 * Returning an empty read point handle essentially bypasses the snapshot management. In
+	 * YBCOnActiveSnapshotChange(), we only switch snapshots if a valid read point handle is present
+	 * in the PG snapshot data structure.
+	 *
+	 * We skip Pg's snapshot management in DDL or initdb mode.
+	 */
+	return !YbIsDDLOrInitDBMode()
 		? YbMakeReadPointHandle(YBCPgGetCurrentReadPoint())
 		: (YbOptionalReadPointHandle)
 	{
@@ -7554,6 +7565,37 @@ YbRegisterSnapshotReadTime(uint64_t read_time)
 												 false /* use_read_time */ ,
 												 &handle));
 	return YbMakeReadPointHandle(handle);
+}
+
+YbOptionalReadPointHandle
+YbCreateNewSnapshot()
+{
+	/*
+	 * Returning an empty read point handle essentially bypasses the snapshot management. In
+	 * YBCOnActiveSnapshotChange(), we only switch snapshots if a valid read point handle is present
+	 * in the PG snapshot data structure.
+	 *
+	 * We skip Pg's snapshot management in DDL or initdb mode.
+	 */
+	if (YbIsDDLOrInitDBMode())
+	{
+		return (YbOptionalReadPointHandle) {};
+	}
+
+	/*
+	 * Flush all earlier operations so that they complete on the previous snapshot.
+	 */
+	HandleYBStatus(YBCPgFlushBufferedOperations());
+
+	/*
+	 * If this is a retry for a kReadRestart error, avoid resetting the read point.
+	 */
+	if (!YBCIsRestartReadPointRequested())
+	{
+		HandleYBStatus(YBCPgResetTransactionReadPoint());
+	}
+
+  return YbMakeReadPointHandle(YBCPgGetCurrentReadPoint());
 }
 
 /*
