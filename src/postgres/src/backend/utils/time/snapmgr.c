@@ -326,6 +326,8 @@ GetTransactionSnapshot(void)
 		return HistoricSnapshot;
 	}
 
+	elog(DEBUG3, "GetTransactionSnapshot: FirstSnapshotSet: %d", FirstSnapshotSet); /* YB added log */
+
 	/* First call in transaction? */
 	if (!FirstSnapshotSet)
 	{
@@ -375,28 +377,6 @@ GetTransactionSnapshot(void)
 
 	/* Don't allow catalog snapshot to be older than xact snapshot. */
 	InvalidateCatalogSnapshot();
-
-	/*
-	 * YB: We have to RESET read point in YSQL for READ COMMITTED isolation level.
-	 * A read point is analogous to the snapshot in PostgreSQL.
-	 *
-	 * We also need to flush all earlier operations so that they complete on the
-	 * previous snapshot.
-	 */
-	if (YbIsReadCommittedTxn())
-	{
-		HandleYBStatus(YBCPgFlushBufferedOperations());
-
-		/*
-		 * If this is a retry for a kReadRestart error, avoid resetting the
-		 * read point
-		 */
-		if (!YBCIsRestartReadPointRequested())
-		{
-			elog(DEBUG2, "Resetting read point for statement in Read Committed txn");
-			HandleYBStatus(YBCPgResetTransactionReadPoint());
-		}
-	}
 
 	CurrentSnapshot = GetSnapshotData(&CurrentSnapshotData);
 
@@ -814,6 +794,7 @@ PushActiveSnapshotWithLevel(Snapshot snap, int snap_level)
 	if (OldestActiveSnapshot == NULL)
 		OldestActiveSnapshot = ActiveSnapshot;
 
+	elog(DEBUG2, "PushActiveSnapshotWithLevel %d", snap_level); /* YB added log */
 	YBCOnActiveSnapshotChange();
 }
 
@@ -878,6 +859,8 @@ PopActiveSnapshot(void)
 	Assert(ActiveSnapshot->as_snap->active_count > 0);
 
 	ActiveSnapshot->as_snap->active_count--;
+
+	elog(DEBUG2, "PopActiveSnapshot at level %d", ActiveSnapshot->as_level); /* YB added log */
 
 	if (ActiveSnapshot->as_snap->active_count == 0 &&
 		ActiveSnapshot->as_snap->regd_count == 0)
@@ -1104,6 +1087,8 @@ AtSubAbort_Snapshot(int level)
 		Assert(ActiveSnapshot->as_snap->active_count >= 1);
 		ActiveSnapshot->as_snap->active_count -= 1;
 
+		elog(DEBUG3, "Pop snapshot at level %d", ActiveSnapshot->as_level); /* YB added log */
+
 		if (ActiveSnapshot->as_snap->active_count == 0 &&
 			ActiveSnapshot->as_snap->regd_count == 0)
 			FreeSnapshot(ActiveSnapshot->as_snap);
@@ -1218,6 +1203,30 @@ AtEOXact_Snapshot(bool isCommit, bool resetXmin)
 		SnapshotResetXmin();
 
 	Assert(resetXmin || MyProc->xmin == 0);
+}
+
+void
+YBResetSnapshotsForRetry()
+{
+	/*
+	 * YB: Below is a selective reset of the snapshot state that is needed for retry. The copy paste
+	 * is from the AtEOXact_Snapshot() function.
+	 */
+
+	FirstXactSnapshot = NULL;
+	CatalogSnapshot = NULL;
+
+	/*
+	 * And reset our state.  We don't need to free the memory explicitly --
+	 * it'll go away with TopTransactionContext.
+	 */
+	ActiveSnapshot = NULL;
+	OldestActiveSnapshot = NULL;
+
+	CurrentSnapshot = NULL;
+	SecondarySnapshot = NULL;
+
+	FirstSnapshotSet = false;
 }
 
 static char *

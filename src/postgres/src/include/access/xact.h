@@ -538,7 +538,6 @@ extern int	YBGetEffectivePggateIsolationLevel();
 extern void YBInitializeTransaction(void);
 extern void YBResetTransactionReadPoint(void);
 extern void YBRestartReadPoint(void);
-extern void YBCRestartWriteTransaction(void);
 extern void YbSetTxnWithPgOps(uint8 pg_op_type);
 extern uint8 YbGetPgOpsInCurrentTxn(void);
 extern void YbBeginInternalSubTransactionForReadCommittedStatement();

@@ -2315,30 +2315,6 @@ StartTransaction(void)
 }
 
 /*
- * Recreates the state required to restart the write that received a transaction
- * conflict.
- */
-void
-YBCRestartWriteTransaction()
-{
-	/*
-	 * Presence of triggers pushes additional snapshots. Pop all of them. Given
-	 * that we restart the writes only when we haven't sent any data back to the
-	 * user, removing all snapshots is safe.
-	 */
-	PopAllActiveSnapshots();
-
-	AtEOXact_SPI(false /* isCommit */ );
-
-	/*
-	 * Recreate the global state present for triggers that would have changed
-	 * during the execution of the failed write.
-	 */
-	AfterTriggerEndXact(false /* isCommit */ );
-	AfterTriggerBeginXact();
-}
-
-/*
  *	CommitTransaction
  *
  * NB: if you change this routine, better look at PrepareTransaction too!

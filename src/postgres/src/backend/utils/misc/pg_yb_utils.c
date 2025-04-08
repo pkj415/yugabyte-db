@@ -7172,13 +7172,6 @@ YbCalculateTimeDifferenceInMicros(TimestampTz yb_start_time)
 	return secs * USECS_PER_SEC + microsecs;
 }
 
-bool
-YbIsReadCommittedTxn()
-{
-	return IsYBReadCommitted() &&
-		!(YBCPgIsDdlMode() || YBCIsInitDbModeEnvVarSet());
-}
-
 static YbOptionalReadPointHandle
 YbMakeReadPointHandle(YbcReadPointHandle read_point)
 {
@@ -7189,7 +7182,7 @@ YbMakeReadPointHandle(YbcReadPointHandle read_point)
 YbOptionalReadPointHandle
 YbBuildCurrentReadPointHandle()
 {
-	return YbIsReadCommittedTxn()
+	return !(YBCPgIsDdlMode() || YBCIsInitDbModeEnvVarSet())
 		? YbMakeReadPointHandle(YBCPgGetCurrentReadPoint())
 		: (YbOptionalReadPointHandle) {};
 }
@@ -7210,6 +7203,35 @@ YbRegisterSnapshotReadTime(uint64_t read_time)
 												 false /* use_read_time */ ,
 												 &handle));
 	return YbMakeReadPointHandle(handle);
+}
+
+YbOptionalReadPointHandle
+YbFetchLatestReadPointHandle()
+{
+	if (YBCPgIsDdlMode() || YBCIsInitDbModeEnvVarSet())
+	{
+		/*
+		 * TODO: Once we integrate DDL and DML transactions, we should use the same
+		 * logic for both. Currently, we just return an empty read time point handle
+		 * for DDLs.
+		 */
+		return (YbOptionalReadPointHandle) {};
+	}
+
+	/*
+	 * Flush all earlier operations so that they complete on the previous snapshot.
+	 */
+	HandleYBStatus(YBCPgFlushBufferedOperations());
+
+	/*
+	 * If this is a retry for a kReadRestart error, avoid resetting the read point.
+	 */
+	if (!YBCIsRestartReadPointRequested())
+	{
+		HandleYBStatus(YBCPgResetTransactionReadPoint());
+	}
+
+  return YbMakeReadPointHandle(YBCPgGetCurrentReadPoint());
 }
 
 /*

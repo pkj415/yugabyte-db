@@ -441,23 +441,6 @@ YBCBuildYBTupleIdDescriptor(const RI_ConstraintInfo *riinfo,
 	/* If PK is partitioned, set referenced_rel to the leaf relation/index. */
 	TupleConversionMap *leaf_root_conversion_map = NULL;
 
-	if (pk_rel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
-	{
-		if (!(referenced_rel = YbFindReferencedPartition(estate, riinfo,
-														 fkslot, pk_rel,
-														 using_index,
-														 &leaf_root_conversion_map)))
-		{
-			/*
-			 * Could not find partition. It is best to not use the batched
-			 * lookup optimization. Return NULL.
-			 */
-			RelationClose(pk_rel);
-			RelationClose(pk_idx_rel);
-			return NULL;
-		}
-	}
-
 	Assert(!using_index ||
 		   IndexRelationGetNumberOfKeyAttributes(referenced_rel) == riinfo->nkeys);
 
@@ -638,7 +621,12 @@ RI_FKey_check(TriggerData *trigdata)
 			break;
 	}
 
-	if (IsYBRelation(pk_rel))
+	/*
+	 * YB: Skip fast path if the referenced table is partitioned. This is because in Pg code path
+	 * after this block, detectNewRows is set to true for a hack. We should do the same for that
+	 * case.
+	 */
+	if (IsYBRelation(pk_rel) && (pk_rel->rd_rel->relkind != RELKIND_PARTITIONED_TABLE))
 	{
 		/*
 		 * Use fast path for FK check in case ybctid for row in referenced
@@ -2721,7 +2709,7 @@ ri_PerformCheck(const RI_ConstraintInfo *riinfo,
 	 * that SPI_execute_snapshot will register the snapshots, so we don't need
 	 * to bother here.
 	 */
-	if (!IsYBRelation(pk_rel) && IsolationUsesXactSnapshot() && detectNewRows)
+	if (IsolationUsesXactSnapshot() && detectNewRows)
 	{
 		CommandCounterIncrement();	/* be sure all my own work is visible */
 		test_snapshot = GetLatestSnapshot();

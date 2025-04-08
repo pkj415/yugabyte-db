@@ -182,5 +182,6 @@ extern void RestoreTransactionSnapshot(Snapshot snapshot, void *source_pgproc);
 extern void PopAllActiveSnapshots(void);
 extern void YBCheckSnapshotsAllowed(bool check_isolation_level);
 extern void YbInitSnapshot(Snapshot snap);
+extern void YBResetSnapshotsForRetry(void);
 
 #endif							/* SNAPMGR_H */
