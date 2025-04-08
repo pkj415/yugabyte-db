@@ -64,6 +64,7 @@ typedef struct
 	int			nblockers;
 	/* These fields are filled by check_testspec(): */
 	Step	   *step;			/* link to referenced Step */
+	int 			yb_num_ungranted_before_execution;		/* number of ungranted locks before execution of statement */
 } PermutationStep;
 
 typedef struct

@@ -75,9 +75,6 @@ static void printResultSet(PGresult *res);
 static void isotesterNoticeProcessor(void *arg, const char *message);
 static void blackholeNoticeProcessor(void *arg, const char *message);
 
-/* This is YB specific logic. See usage for description */
-#define YB_NUM_SECONDS_TO_WAIT_TO_ASSUME_SESSION_BLOCKED 4
-
 static void
 disconnect_atexit(void)
 {
@@ -524,6 +521,24 @@ step_bsearch_cmp(const void *a, const void *b)
 	return strcmp(stepname, step->name);
 }
 
+static int
+YbGetNumUngrantedLocks()
+{
+	PGresult   *res;
+	int	yb_num_ungranted_before_execution;
+
+	res = PQexec(conns[0].conn, "SELECT COUNT(*) FROM pg_locks WHERE granted = 'f'");
+	if (PQresultStatus(res) != PGRES_TUPLES_OK || PQntuples(res) != 1)
+	{
+		fprintf(stderr, "lock wait query failed: %s",
+				PQerrorMessage(conns[0].conn));
+		exit(1);
+	}
+	yb_num_ungranted_before_execution = atoi(PQgetvalue(res, 0, 0));
+	PQclear(res);
+	return yb_num_ungranted_before_execution;
+}
+
 /*
  * Run one permutation
  */
@@ -675,6 +690,7 @@ run_permutation(TestSpec *testspec, int nsteps, PermutationStep **steps)
 		}
 
 		/* Send the query for this step. */
+		pstep->yb_num_ungranted_before_execution = YbGetNumUngrantedLocks();
 		if (!PQsendQuery(conn, step->sql))
 		{
 			fprintf(stdout, "failed to send query for step %s: %s\n",
@@ -908,6 +924,8 @@ try_complete_step(TestSpec *testspec, PermutationStep *pstep, int flags)
 				waiting = ((PQgetvalue(res, 0, 0))[0] == 't');
 				PQclear(res);
 
+				waiting = pstep->yb_num_ungranted_before_execution < YbGetNumUngrantedLocks();
+
 				if (waiting)	/* waiting to acquire a lock */
 				{
 					/*
@@ -945,25 +963,6 @@ try_complete_step(TestSpec *testspec, PermutationStep *pstep, int flags)
 			td = (int64) current_time.tv_sec - (int64) start_time.tv_sec;
 			td *= USECS_PER_SEC;
 			td += (int64) current_time.tv_usec - (int64) start_time.tv_usec;
-
-			/*
-			 * Yugabyte specific logic: Since we don't use pg_locks, we can't
-			 * determine if a session is blocked on another session using the
-			 * PREP_WAITING function above. So, we instead assume that waiting
-			 * for for >= 2 second means the session is blocked on another
-			 * session.
-			 *
-			 * This is not a perfect check but good enough for now.
-			 *
-			 * TODO(Piyush): Replace this by a deterministic check when
-			 * blocking information is exposed via Pg locks (#12168).
-			 */
-			if (td > YB_NUM_SECONDS_TO_WAIT_TO_ASSUME_SESSION_BLOCKED * USECS_PER_SEC && !canceled)
-			{
-				if (!(flags & STEP_RETRY))
-					printf("step %s: %s <waiting ...>\n", step->name, step->sql);
-				return true;
-			}
 
 			/*
 			 * After max_step_wait microseconds, try to cancel the query.
