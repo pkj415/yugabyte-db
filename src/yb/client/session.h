@@ -130,9 +130,9 @@ class YBSession : public std::enable_shared_from_this<YBSession> {
   // Apply the write operation.
   //
   // Applied operations just added to the session and waits to be flushed.
-  void Apply(YBOperationPtr yb_op);
+  void Apply(YBOperationPtr yb_op, bool is_ddl = false);
 
-  void Apply(const std::vector<YBOperationPtr>& ops);
+  void Apply(const std::vector<YBOperationPtr>& ops, bool is_ddl = false);
 
   bool IsInProgress(YBOperationPtr yb_op) const;
 
@@ -255,7 +255,7 @@ class YBSession : public std::enable_shared_from_this<YBSession> {
 
   YBSession(YBClient* client, const scoped_refptr<ClockBase>& clock);
 
-  internal::Batcher& Batcher();
+  internal::Batcher& Batcher(bool is_ddl = false);
 
   BatcherConfig batcher_config_;
 

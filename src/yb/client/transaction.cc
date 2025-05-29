@@ -471,7 +471,8 @@ class YBTransaction::Impl final : public internal::TxnBatcherIf {
   void Flushed(
       const internal::InFlightOps& ops,
       const boost::optional<SubTransactionMetadataPB>& subtransaction_pb,
-      const ReadHybridTime& used_read_time, const Status& status) EXCLUDES(mutex_) override {
+      const ReadHybridTime& used_read_time, const Status& status,
+      bool is_ddl) EXCLUDES(mutex_) override {
     TRACE_TO(trace_, "Flushed $0 ops. with Status $1", ops.size(), status.ToString());
     VLOG_WITH_PREFIX(5)
         << "Flushed: " << yb::ToString(ops) << ", used_read_time: " << used_read_time
@@ -490,7 +491,7 @@ class YBTransaction::Impl final : public internal::TxnBatcherIf {
       running_requests_ -= ops.size();
 
       if (status.ok()) {
-        if (used_read_time && metadata_.isolation != IsolationLevel::SERIALIZABLE_ISOLATION) {
+        if (used_read_time && metadata_.isolation != IsolationLevel::SERIALIZABLE_ISOLATION && !is_ddl) {
           const bool read_point_already_set = static_cast<bool>(read_point_.GetReadTime());
           if (read_point_already_set) {
 #ifndef NDEBUG

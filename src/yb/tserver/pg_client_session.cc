@@ -660,7 +660,7 @@ Result<PgClientSessionOperations> PrepareOperations(
   }
 
   for (const auto& pg_client_session_operation : ops) {
-    session->Apply(pg_client_session_operation.op);
+    session->Apply(pg_client_session_operation.op, req->options().ddl_mode());
   }
 
   finished = true;
@@ -2673,49 +2673,21 @@ class PgClientSession::Impl {
     return session_data;
   }
 
-  Result<SetupSessionResult> SetupSession(
-      const PgPerformOptionsPB& options, CoarseTimePoint deadline, HybridTime in_txn_limit = {}) {
-    const auto txn_serial_no = options.txn_serial_no();
-    const auto read_time_serial_no = options.read_time_serial_no();
-    auto kind = PgClientSessionKind::kPlain;
-    if (options.use_catalog_session()) {
-      SCHECK(!options.read_from_followers(),
-            InvalidArgument,
-            "Reading catalog from followers is not allowed");
-      kind = PgClientSessionKind::kCatalog;
-      EnsureSession(kind, deadline);
-    } else if (options.ddl_mode() && !options.ddl_use_regular_transaction_block()) {
-      kind = PgClientSessionKind::kDdl;
-      EnsureSession(kind, deadline);
-      RETURN_NOT_OK(GetDdlTransactionMetadata(
-          true /* use_transaction */, false /* use_regular_transaction_block */, deadline,
-          options.priority()));
-    } else {
-      DCHECK(kind == PgClientSessionKind::kPlain);
-      auto& session = EnsureSession(kind, deadline);
-      RETURN_NOT_OK(CheckPlainSessionPendingUsedReadTime(txn_serial_no));
-      if (txn_serial_no != txn_serial_no_) {
-        read_point_history_.Clear();
-      } else if (read_time_serial_no != read_time_serial_no_) {
-        auto& read_point = *session->read_point();
-        if (read_point_history_.Restore(&read_point, read_time_serial_no)) {
-          read_time_serial_no_ = read_time_serial_no;
-        }
-      }
-      RETURN_NOT_OK(BeginTransactionIfNecessary(options, deadline));
-    }
-
+  Status UpdateReadTime(const PgPerformOptionsPB& options, PgClientSessionKind kind, CoarseTimePoint deadline, HybridTime in_txn_limit = {}) {
     auto& session_data = GetSessionData(kind);
     auto& session = *session_data.session;
     auto& txn = session_data.transaction;
 
-    VLOG_WITH_PREFIX_AND_FUNC(4) << options.ShortDebugString() << ", deadline: "
-                                << MonoDelta(deadline - CoarseMonoClock::now());
+    const auto txn_serial_no = options.txn_serial_no();
+    const auto read_time_serial_no = options.read_time_serial_no();
+
+    if (options.ddl_mode()) {
+      RSTATUS_DCHECK(!options.restart_transaction(), IllegalState, "DDL can't face read restart errors, so restarting shouldn't happen");
+      RSTATUS_DCHECK(options.read_time_manipulation() == ReadTimeManipulation::NONE, IllegalState, "Read time manipulation can't be specified for DDLs");
+      // RSTATUS_DCHECK(read_time_serial_no_ == read_time_serial_no, IllegalState, "Read time serial number can't move forward in a DDL transaction");
+    }
 
     if (options.restart_transaction()) {
-      if (options.ddl_mode()) {
-        return STATUS(NotSupported, "Restarting a DDL transaction not supported");
-      }
       RETURN_NOT_OK(RestartTransaction(kind, deadline));
     } else {
       const auto is_plain_session = (kind == PgClientSessionKind::kPlain);
@@ -2758,8 +2730,7 @@ class PgClientSession::Impl {
 
     // TODO: Reset in_txn_limit which might be on session from past Perform? Not resetting will not
     // cause any issue, but should we reset for safety?
-    if (!(options.ddl_mode() && !options.ddl_use_regular_transaction_block()) &&
-        !options.use_catalog_session()) {
+    if (!options.ddl_mode() && !options.use_catalog_session()) {
       txn_serial_no_ = txn_serial_no;
       read_time_serial_no_ = read_time_serial_no;
       if (in_txn_limit) {
@@ -2782,6 +2753,49 @@ class PgClientSession::Impl {
           << " for read only txn/stmt";
       }
     }
+    return Status::OK();
+  }
+
+  Result<SetupSessionResult> SetupSession(
+      const PgPerformOptionsPB& options, CoarseTimePoint deadline, HybridTime in_txn_limit = {}) {
+    const auto txn_serial_no = options.txn_serial_no();
+    const auto read_time_serial_no = options.read_time_serial_no();
+    auto kind = PgClientSessionKind::kPlain;
+    if (options.use_catalog_session()) {
+      SCHECK(!options.read_from_followers(),
+            InvalidArgument,
+            "Reading catalog from followers is not allowed");
+      kind = PgClientSessionKind::kCatalog;
+      EnsureSession(kind, deadline);
+    } else if (options.ddl_mode() && !options.ddl_use_regular_transaction_block()) {
+      kind = PgClientSessionKind::kDdl;
+      EnsureSession(kind, deadline);
+      RETURN_NOT_OK(GetDdlTransactionMetadata(
+          true /* use_transaction */, false /* use_regular_transaction_block */, deadline,
+          options.priority()));
+    } else {
+      DCHECK(kind == PgClientSessionKind::kPlain);
+      auto& session = EnsureSession(kind, deadline);
+      RETURN_NOT_OK(CheckPlainSessionPendingUsedReadTime(txn_serial_no));
+      if (txn_serial_no != txn_serial_no_) {
+        read_point_history_.Clear();
+      } else if (read_time_serial_no != read_time_serial_no_) {
+        auto& read_point = *session->read_point();
+        if (read_point_history_.Restore(&read_point, read_time_serial_no)) {
+          read_time_serial_no_ = read_time_serial_no;
+        }
+      }
+      RETURN_NOT_OK(BeginTransactionIfNecessary(options, deadline));
+    }
+
+    auto& session_data = GetSessionData(kind);
+    auto& session = *session_data.session;
+    auto& txn = session_data.transaction;
+
+    VLOG_WITH_PREFIX_AND_FUNC(4) << options.ShortDebugString() << ", deadline: "
+                                << MonoDelta(deadline - CoarseMonoClock::now());
+
+    RETURN_NOT_OK(UpdateReadTime(options, kind, deadline, in_txn_limit));
 
     session.SetDeadline(deadline);
 

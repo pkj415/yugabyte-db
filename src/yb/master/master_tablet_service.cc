@@ -167,6 +167,7 @@ void MasterTabletServiceImpl::Write(const tserver::WriteRequestPB* req,
     }
   }
 
+  LOG(INFO) << "Piyush - master write req: " << req->ShortDebugString();
   tserver::TabletServiceImpl::Write(req, resp, std::move(context));
 
   if (log_versions) {

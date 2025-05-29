@@ -16,6 +16,7 @@
 #include "yb/tserver/tserver_shared_mem.h"
 #include "yb/util/env_util.h"
 #include "yb/util/path_util.h"
+#include "yb/util/flags.h"
 #include "yb/util/scope_exit.h"
 #include "yb/util/string_util.h"
 #include "yb/util/test_thread_holder.h"
@@ -27,11 +28,17 @@ using std::string;
 
 using namespace std::literals;
 
+DECLARE_string(vmodule);
 namespace yb {
 namespace pgwrapper {
 
 class PgCatalogVersionTest : public LibPqTestBase {
  protected:
+  void SetUp() override {
+    ASSERT_OK(SET_FLAG(vmodule, "conflict_resolution=5"));
+    LibPqTestBase::SetUp();
+  }
+
   using Version = uint64_t;
 
   struct CatalogVersion {
@@ -51,6 +58,8 @@ class PgCatalogVersionTest : public LibPqTestBase {
         "--allowed_preview_flags_csv=ysql_yb_enable_invalidation_messages");
     options->extra_tserver_flags.push_back(
         "--allowed_preview_flags_csv=ysql_yb_enable_invalidation_messages");
+    options->extra_tserver_flags.push_back(
+        "--vmodule=conflict_resolution=5,object_lock_manager=5");
   }
 
   Result<int64_t> GetCatalogVersion(PGConn* conn) {
@@ -2952,6 +2961,56 @@ TEST_F(PgCatalogVersionTest, CreateFunction) {
   // Connection 2: Call the function again; should now return 'dom'
   result = ASSERT_RESULT(conn2.FetchRow<std::string>("SELECT echo_me('red'::rainbow)"));
   ASSERT_EQ(result, "dom");
+}
+
+TEST_F(PgCatalogVersionTest, NoConflictOrReadRestartErrorsOnCatalogVersionIncrements) {
+  // ASSERT_OK(cluster_->SetFlagOnTServers("vmodule", "conflict_resolution=5"));
+  TestThreadHolder thread_holder;
+  constexpr size_t kThreadsCount = 3;
+  CountDownLatch start_latch(kThreadsCount);
+  std::atomic<int> total_drops;
+  static constexpr auto* kYugabyteDatabase = "yugabyte";
+  auto conn = ASSERT_RESULT(PGConnBuilder({
+    .host = pg_ts->bind_host(),
+    .port = pg_ts->ysql_port(),
+    .dbname = kYugabyteDatabase
+  }).Connect());
+  // auto conn = ASSERT_RESULT(SetDefaultTransactionIsolation(
+  //     conn_test_new, IsolationLevel::SNAPSHOT_ISOLATION));
+
+  const auto yugabyte_db_oid = ASSERT_RESULT(GetDatabaseOid(&conn, kYugabyteDatabase));
+  auto versions = ASSERT_RESULT(GetMasterCatalogVersionMap(&conn));
+  auto initial_version = versions[yugabyte_db_oid].current_version;
+
+  for (size_t i = 0; i < kThreadsCount; ++i) {
+    thread_holder.AddThreadFunctor(
+        [this, &stop = thread_holder.stop_flag(), idx = i, &start_latch, &total_drops] {
+          const auto table_name = Format("t$0", idx);
+
+          // TODO (#19975): Enable read committed isolation
+          auto conn = ASSERT_RESULT(PGConnBuilder({
+            .host = pg_ts->bind_host(),
+            .port = pg_ts->ysql_port(),
+            .dbname = kYugabyteDatabase
+          }).Connect());
+          start_latch.CountDown();
+          start_latch.Wait();
+          while (!stop.load(std::memory_order_acquire)) {
+            ASSERT_OK(conn.ExecuteFormat("CREATE TABLE $0 (k int primary key, v int)", table_name));
+            ASSERT_OK(conn.ExecuteFormat("DROP TABLE $0", table_name));
+            total_drops++;
+          }
+        });
+  }
+
+  sleep(20);
+
+  versions = ASSERT_RESULT(GetMasterCatalogVersionMap(&conn));
+  auto final_version = versions[yugabyte_db_oid].current_version;
+  LOG(INFO) << "Total drops: " << total_drops
+            << ", initial version: " << initial_version
+            << ", final version: " << final_version;
+  ASSERT_EQ(final_version - initial_version, total_drops);
 }
 
 } // namespace pgwrapper

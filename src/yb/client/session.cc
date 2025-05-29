@@ -291,10 +291,13 @@ ConsistentReadPoint* YBSession::read_point() {
   return batcher_config_.read_point();
 }
 
-internal::Batcher& YBSession::Batcher() {
+internal::Batcher& YBSession::Batcher(bool is_ddl) {
   if (!batcher_) {
     batcher_config_.session = shared_from_this();
     batcher_ = CreateBatcher(batcher_config_);
+    if (is_ddl) {
+      batcher_->SetIsDdl();
+    }
     if (deadline_ != CoarseTimePoint()) {
       batcher_->SetDeadline(deadline_);
     } else {
@@ -322,15 +325,15 @@ void PrepareAndApplyYbOp(internal::Batcher* batcher, YBOperationPtr yb_op) {
 }
 }  // namespace
 
-void YBSession::Apply(YBOperationPtr yb_op) {
-  PrepareAndApplyYbOp(&Batcher(), std::move(yb_op));
+void YBSession::Apply(YBOperationPtr yb_op, bool is_ddl) {
+  PrepareAndApplyYbOp(&Batcher(is_ddl), std::move(yb_op));
 }
 
-void YBSession::Apply(const std::vector<YBOperationPtr>& ops) {
+void YBSession::Apply(const std::vector<YBOperationPtr>& ops, bool is_ddl) {
   if (ops.empty()) {
     return;
   }
-  auto& batcher = Batcher();
+  auto& batcher = Batcher(is_ddl);
   for (const auto& yb_op : ops) {
     PrepareAndApplyYbOp(&batcher, yb_op);
   }

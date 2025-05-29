@@ -568,7 +568,7 @@ void Batcher::ExecuteOperations(Initial initial) {
 
   // Now flush the ops for each group.
   // Consistent read is not required when whole batch fits into one command.
-  const auto need_consistent_read = force_consistent_read || ops_info_.groups.size() > 1;
+  const auto need_consistent_read = !is_ddl_ && (force_consistent_read || ops_info_.groups.size() > 1);
   VLOG_WITH_PREFIX_AND_FUNC(3) << "need_consistent_read=" << need_consistent_read;
 
   // Set batcher's 'rpcs_start_time_micros_' only when it is uninitialized, i.e, only for
@@ -695,7 +695,8 @@ void Batcher::Flushed(
       // YBSession::AddErrorsAndRunCallback.
       // https://github.com/yugabyte/yugabyte-db/issues/7984.
       transaction->batcher_if().Flushed(
-          ops, ops_info_.metadata.subtransaction_pb, flush_extra_result.used_read_time, status);
+          ops, ops_info_.metadata.subtransaction_pb, flush_extra_result.used_read_time, status,
+          is_ddl_);
     }
   }
   if (status.ok() && read_point_) {

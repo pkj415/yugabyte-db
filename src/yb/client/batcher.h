@@ -110,7 +110,7 @@ class TxnBatcherIf {
   virtual void Flushed(
       const internal::InFlightOps& ops,
       const boost::optional<SubTransactionMetadataPB>& subtransaction_pb,
-      const ReadHybridTime& used_read_time, const Status& status) = 0;
+      const ReadHybridTime& used_read_time, const Status& status, bool is_ddl) = 0;
 
   // This function is used to init metadata of Write/Read request.
   // If we don't have enough information, then the function returns false and stores
@@ -186,6 +186,9 @@ class Batcher : public Runnable, public std::enable_shared_from_this<Batcher> {
   // to when the Flush call is made (eg even if the lookup of the TS takes a long time, it
   // may time out before even sending an op). TODO: implement that
   void SetDeadline(CoarseTimePoint deadline);
+  void SetIsDdl() {
+    is_ddl_ = true;
+  }
 
   // Add a new operation to the batch. Requires that the batch has not yet been flushed.
   // TODO: in other flush modes, this may not be the case -- need to
@@ -420,6 +423,8 @@ class Batcher : public Runnable, public std::enable_shared_from_this<Batcher> {
   // - For a transaction advisory lock request: the below points to
   //   the session-level transaction, if exists.
   boost::optional<TransactionMetadata> background_transaction_meta_ = boost::none;
+
+  bool is_ddl_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(Batcher);
 };

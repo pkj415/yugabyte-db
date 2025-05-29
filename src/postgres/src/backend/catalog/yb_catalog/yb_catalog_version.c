@@ -23,6 +23,7 @@
 #include "catalog/pg_proc.h"
 #include "catalog/pg_type.h"
 #include "catalog/pg_yb_catalog_version.h"
+#include "catalog/pg_yb_invalidation_messages_d.h"
 #include "catalog/schemapg.h"
 #include "catalog/yb_catalog_version.h"
 #include "executor/ybExpr.h"
@@ -31,6 +32,7 @@
 #include "nodes/makefuncs.h"
 #include "optimizer/cost.h"
 #include "pg_yb_utils.h"
+#include "storage/lmgr.h"
 #include "utils/catcache.h"
 #include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
@@ -647,6 +649,7 @@ YbIncrementMasterCatalogVersionTableEntry(bool is_breaking_change,
 										  const SharedInvalidationMessage *invalMessages,
 										  int nmsgs)
 {
+	elog(LOG, "Piyush - YbIncrementMasterCatalogVersionTableEntry");
 	YbResetNewCatalogVersion();
 	if (YbGetCatalogVersionType() != CATALOG_VERSION_CATALOG_TABLE)
 		return false;
@@ -655,6 +658,8 @@ YbIncrementMasterCatalogVersionTableEntry(bool is_breaking_change,
 
 	Assert(OidIsValid(database_oid));
 
+	LockRelationOid(YBCatalogVersionRelationId, AccessExclusiveLock);
+	LockRelationOid(YbInvalidationMessagesRelationId, AccessExclusiveLock);
 	YbIncrementMasterDBCatalogVersionTableEntryImpl(database_oid,
 													is_breaking_change,
 													is_global_ddl,
