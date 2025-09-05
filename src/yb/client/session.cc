@@ -432,6 +432,14 @@ void YBSession::SetObjectLockingTxnMeta(const TransactionMetadata& object_lockin
   Batcher().SetObjectLockingTxnMeta(object_locking_txn_meta);
 }
 
+void YBSession::SetTxnMetaForCatalogReads(const TransactionMetadata& txn_meta) {
+  Batcher().SetTxnMetaForCatalogReads(txn_meta);
+}
+
+void YBSession::SetSubTxnMetaForCatalogReads(const SubTransactionMetadataPB& subtxn_meta) {
+  Batcher().SetSubTxnMetaForCatalogReads(subtxn_meta);
+}
+
 bool ShouldSessionRetryError(const Status& status) {
   return IsRetryableClientError(status) ||
          tserver::TabletServerError(status) == tserver::TabletServerErrorPB::TABLET_SPLIT ||

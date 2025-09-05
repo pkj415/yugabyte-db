@@ -540,6 +540,12 @@ void Batcher::ExecuteOperations(Initial initial) {
   ADOPT_TRACE(transaction ? transaction->trace() : Trace::CurrentTrace());
   ops_info_.metadata.background_transaction_meta = background_transaction_meta_;
   ops_info_.metadata.object_locking_txn_meta = object_locking_txn_meta_;
+  if (txn_meta_for_catalog_reads_) {
+    ops_info_.metadata.transaction = txn_meta_for_catalog_reads_.value();
+    if (subtxn_meta_for_catalog_reads_) {
+      ops_info_.metadata.subtransaction_pb = subtxn_meta_for_catalog_reads_.value();
+    }
+  }
   if (transaction) {
     // If this Batcher is executed in context of transaction,
     // then this transaction should initialize metadata used by RPC calls.
@@ -581,8 +587,9 @@ void Batcher::ExecuteOperations(Initial initial) {
 
   // Now flush the ops for each group.
   // Consistent read is not required when whole batch fits into one command.
+  VLOG_WITH_PREFIX_AND_FUNC(3) << "force_consistent_read=" << force_consistent_read
+                               << ", ops_info_.groups.size()=" << ops_info_.groups.size();
   const auto need_consistent_read = force_consistent_read || ops_info_.groups.size() > 1;
-  VLOG_WITH_PREFIX_AND_FUNC(3) << "need_consistent_read=" << need_consistent_read;
 
   // Set batcher's 'rpcs_start_time_micros_' only when it is uninitialized, i.e, only for
   // a new batcher and not a retry_batcher.
@@ -677,6 +684,11 @@ std::shared_ptr<AsyncRpc> Batcher::CreateRpc(
   auto transaction = this->transaction();
   if (!data.need_metadata && transaction && transaction->HasPendingAsyncWrites(tablet_id)) {
     data.need_metadata = true;
+  }
+
+  if (txn_meta_for_catalog_reads_) {
+    data.need_metadata = true;
+    data.is_catalog_read = true;
   }
 
   const auto op_group = first_op->group();

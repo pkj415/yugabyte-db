@@ -57,6 +57,7 @@
 #include "utils/rel.h"
 #include "utils/selfuncs.h"
 #include "utils/syscache.h"
+#include "yb/yql/pggate/ybc_gflags.h"
 
 
 /*
@@ -3550,9 +3551,17 @@ yb_single_row_update_or_delete_path(PlannerInfo *root,
 			 * update of those indexes regardless. Still allow to bail out
 			 * if there are triggers. There is no easy way to tell what columns
 			 * are affected by a trigger, so we should update all indexes.
+			 *
+			 * Note that expression push down is disabled for the catalog version
+			 * table when object locking is enabled. This ensures that we use the
+			 * catalog snapshot to perform the read and not the transaction read
+			 * point. The catalog snapshot is to be used because the transaction
+			 * read point can be quite old and we want to read the latest catalog
+			 * version when performing the catalog version increment.
 			 */
 			if ((TupleDescAttr(tupDesc, resno - 1)->attnotnull &&
 				 (relation->rd_id != YBCatalogVersionRelationId ||
+				  YbIsObjectLockingEnabled() ||
 				  !yb_is_calling_internal_sql_for_ddl)) ||
 				YBIsCollationValidNonC(ybc_get_attcollation(tupDesc, resno)) ||
 				!YbCanPushdownExpr(tle->expr, &colrefs, relid))

@@ -2281,40 +2281,8 @@ GetSnapshotDataReuse(Snapshot snapshot)
 	return true;
 }
 
-/*
- * GetSnapshotData -- returns information about running transactions.
- *
- * The returned snapshot includes xmin (lowest still-running xact ID),
- * xmax (highest completed xact ID + 1), and a list of running xact IDs
- * in the range xmin <= xid < xmax.  It is used as follows:
- *		All xact IDs < xmin are considered finished.
- *		All xact IDs >= xmax are considered still running.
- *		For an xact ID xmin <= xid < xmax, consult list to see whether
- *		it is considered running or not.
- * This ensures that the set of transactions seen as "running" by the
- * current xact will not change after it takes the snapshot.
- *
- * All running top-level XIDs are included in the snapshot, except for lazy
- * VACUUM processes.  We also try to include running subtransaction XIDs,
- * but since PGPROC has only a limited cache area for subxact XIDs, full
- * information may not be available.  If we find any overflowed subxid arrays,
- * we have to mark the snapshot's subxid data as overflowed, and extra work
- * *may* need to be done to determine what's running (see XidInMVCCSnapshot()).
- *
- * We also update the following backend-global variables:
- *		TransactionXmin: the oldest xmin of any snapshot in use in the
- *			current transaction (this is the same as MyProc->xmin).
- *		RecentXmin: the xmin computed for the most recent snapshot.  XIDs
- *			older than this are known not running any more.
- *
- * And try to advance the bounds of GlobalVis{Shared,Catalog,Data,Temp}Rels
- * for the benefit of the GlobalVisTest* family of functions.
- *
- * Note: this function should probably not be called with an argument that's
- * not statically allocated (see xip allocation below).
- */
 Snapshot
-GetSnapshotData(Snapshot snapshot)
+YbGetSnapshotDataImpl(Snapshot snapshot, bool yb_is_catalog_snapshot)
 {
 	ProcArrayStruct *arrayP = procArray;
 	TransactionId *other_xids = ProcGlobal->xids;
@@ -2665,10 +2633,51 @@ GetSnapshotData(Snapshot snapshot)
 
 	GetSnapshotDataInitOldSnapshot(snapshot);
 
-	snapshot->yb_read_point_handle = YbResetTransactionReadPoint();
-	YbLogSnapshotData("Fetched new snapshot", snapshot,
-					  yb_debug_log_snapshot_mgmt /* log_stack_trace */ );
+	if (!yb_is_catalog_snapshot)
+	{
+		snapshot->yb_read_point_handle = YbResetTransactionReadPoint();
+		YbLogSnapshotData("Fetched new snapshot", snapshot,
+							yb_debug_log_snapshot_mgmt /* log_stack_trace */ );
+	}
 	return snapshot;
+}
+
+/*
+ * GetSnapshotData -- returns information about running transactions.
+ *
+ * The returned snapshot includes xmin (lowest still-running xact ID),
+ * xmax (highest completed xact ID + 1), and a list of running xact IDs
+ * in the range xmin <= xid < xmax.  It is used as follows:
+ *		All xact IDs < xmin are considered finished.
+ *		All xact IDs >= xmax are considered still running.
+ *		For an xact ID xmin <= xid < xmax, consult list to see whether
+ *		it is considered running or not.
+ * This ensures that the set of transactions seen as "running" by the
+ * current xact will not change after it takes the snapshot.
+ *
+ * All running top-level XIDs are included in the snapshot, except for lazy
+ * VACUUM processes.  We also try to include running subtransaction XIDs,
+ * but since PGPROC has only a limited cache area for subxact XIDs, full
+ * information may not be available.  If we find any overflowed subxid arrays,
+ * we have to mark the snapshot's subxid data as overflowed, and extra work
+ * *may* need to be done to determine what's running (see XidInMVCCSnapshot()).
+ *
+ * We also update the following backend-global variables:
+ *		TransactionXmin: the oldest xmin of any snapshot in use in the
+ *			current transaction (this is the same as MyProc->xmin).
+ *		RecentXmin: the xmin computed for the most recent snapshot.  XIDs
+ *			older than this are known not running any more.
+ *
+ * And try to advance the bounds of GlobalVis{Shared,Catalog,Data,Temp}Rels
+ * for the benefit of the GlobalVisTest* family of functions.
+ *
+ * Note: this function should probably not be called with an argument that's
+ * not statically allocated (see xip allocation below).
+ */
+Snapshot
+GetSnapshotData(Snapshot snapshot)
+{
+	return YbGetSnapshotDataImpl(snapshot, false /* yb_is_catalog_snapshot */ );
 }
 
 /*

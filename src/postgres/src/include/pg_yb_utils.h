@@ -1425,6 +1425,8 @@ extern YbOptionalReadPointHandle YbResetTransactionReadPoint();
 
 extern bool YbUseFastBackwardScan();
 
+extern bool YbIsObjectLockingEnabled();
+
 extern bool YbIsYsqlConnMgrWarmupModeEnabled();
 
 extern bool YbIsAuthBackend();

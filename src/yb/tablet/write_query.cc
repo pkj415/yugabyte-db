@@ -89,6 +89,8 @@ DEFINE_test_flag(bool, writequery_stuck_from_callback_leak, false,
 DECLARE_bool(batch_tablet_metrics_update);
 DECLARE_bool(ysql_analyze_dump_metrics);
 DECLARE_bool(ysql_enable_packed_row);
+DECLARE_bool(enable_object_locking_for_table_locks);
+DECLARE_bool(ysql_enable_object_locking_infra);
 
 namespace yb {
 namespace tablet {
@@ -205,6 +207,10 @@ Status CqlPopulateDocOps(
     }
   }
   return Status::OK();
+}
+
+[[nodiscard]] bool IsObjectLockingEnabled() {
+  return FLAGS_enable_object_locking_for_table_locks && FLAGS_ysql_enable_object_locking_infra;
 }
 
 } // namespace
@@ -946,9 +952,12 @@ Status WriteQuery::DoExecute() {
       IllegalState, "background_transaction_id should only be set for advisory lock requests.");
 
   // TODO(wait-queues): Ensure that wait_queue respects deadline() during conflict resolution.
+  VLOG(5) << "Going to call ResolveTransactionConflicts with read_time: "
+          << (read_time_ ? read_time_.read : HybridTime::kMax);
   return docdb::ResolveTransactionConflicts(
       doc_ops_, conflict_management_policy, write_batch, request_scope_, tablet->clock()->Now(),
-      read_time_ ? read_time_.read : HybridTime::kMax, write_batch.transaction().pg_txn_start_us(),
+      (read_time_ && (!IsObjectLockingEnabled() || !tablet->is_sys_catalog())) ?
+          read_time_.read : HybridTime::kMax, write_batch.transaction().pg_txn_start_us(),
       request_start_us(), request_id, tablet->doc_db(), partial_range_key_intents,
       transaction_participant, metrics_,
       &prepare_result_.lock_batch, wait_queue, is_advisory_lock_request, deadline(),

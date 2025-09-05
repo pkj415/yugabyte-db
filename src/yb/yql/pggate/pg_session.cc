@@ -114,10 +114,21 @@ bool IsNeedTransaction(const PgsqlOp& op, bool non_ddl_txn_for_sys_tables_allowe
   return op.need_transaction() || (op.is_write() && non_ddl_txn_for_sys_tables_allowed);
 }
 
+RowMarkType GetRowMarkType(const PgsqlOp& op) {
+  return op.is_read()
+      ? GetRowMarkTypeFromPB(down_cast<const PgsqlReadOp&>(op).read_request())
+      : RowMarkType::ROW_MARK_ABSENT;
+}
+
+bool IsReadOnly(const PgsqlOp& op) {
+  return op.is_read() && !IsValidRowMarkType(GetRowMarkType(op));
+}
+
 Result<bool> ShouldHandleTransactionally(const PgTxnManager& txn_manager,
                                          const PgTableDesc& table,
                                          const PgsqlOp& op,
-                                         bool non_ddl_txn_for_sys_tables_allowed) {
+                                         bool non_ddl_txn_for_sys_tables_allowed,
+                                         bool enable_table_locking) {
   if (!table.schema().table_properties().is_transactional() ||
       !IsNeedTransaction(op, yb_non_ddl_txn_for_sys_tables_allowed) ||
       YBCIsInitDbModeEnvVarSet()) {
@@ -128,6 +139,17 @@ Result<bool> ShouldHandleTransactionally(const PgTxnManager& txn_manager,
     SCHECK(has_non_ddl_txn, IllegalState, "Transactional operation requires transaction");
     return true;
   }
+
+  if (enable_table_locking) {
+    // For catalog reads, use the kCatalog session instead of kTransactional session. This is
+    // required to ensure the catalog reads read the latest data as of the catalog snapshot
+    // that is possibly refreshed multiple times in a transaction when processing invalidation
+    // messages after acquiring object locks.
+    if (IsReadOnly(op)) {
+      return false;
+    }
+  }
+
   if (txn_manager.IsDdlMode() || (non_ddl_txn_for_sys_tables_allowed && has_non_ddl_txn)) {
     return true;
   }
@@ -143,9 +165,11 @@ Result<bool> ShouldHandleTransactionally(const PgTxnManager& txn_manager,
 Result<SessionType> GetRequiredSessionType(const PgTxnManager& txn_manager,
                                            const PgTableDesc& table,
                                            const PgsqlOp& op,
-                                           bool non_ddl_txn_for_sys_tables_allowed) {
+                                           bool non_ddl_txn_for_sys_tables_allowed,
+                                           bool enable_table_locking) {
   if (VERIFY_RESULT(ShouldHandleTransactionally(txn_manager, table, op,
-                                                non_ddl_txn_for_sys_tables_allowed))) {
+                                                non_ddl_txn_for_sys_tables_allowed,
+                                                enable_table_locking))) {
     return SessionType::kTransactional;
   }
 
@@ -172,16 +196,6 @@ void Update(BufferingSettings* buffering_settings, int multiple = 1) {
   } else {
     VLOG(3) << msg;
   }
-}
-
-RowMarkType GetRowMarkType(const PgsqlOp& op) {
-  return op.is_read()
-      ? GetRowMarkTypeFromPB(down_cast<const PgsqlReadOp&>(op).read_request())
-      : RowMarkType::ROW_MARK_ABSENT;
-}
-
-bool IsReadOnly(const PgsqlOp& op) {
-  return op.is_read() && !IsValidRowMarkType(GetRowMarkType(op));
 }
 
 Result<ReadHybridTime> GetReadTime(const PgsqlOps& operations) {
@@ -917,6 +931,8 @@ Result<PerformFuture> PgSession::Perform(BufferableOperations&& ops, PerformOpti
   tserver::PgPerformOptionsPB options;
   const auto ops_read_time = VERIFY_RESULT(GetReadTime(ops.operations()));
   if (ops_options.use_catalog_session) {
+    VLOG(2) << "Perform - catalog_read_time: " << catalog_read_time_
+            << " ops_read_time: " << ops_read_time.ToString();
     if (const auto read_time = ops_read_time ? ops_read_time : catalog_read_time_; read_time) {
       read_time.ToPB(options.mutable_read_time());
     }
@@ -1021,6 +1037,7 @@ Result<PerformFuture> PgSession::Perform(BufferableOperations&& ops, PerformOpti
 
   DEBUG_ONLY(pg_txn_manager_->DEBUG_CheckOptionsForPerform(options));
 
+  VLOG(2) << "Perform options: " << options.ShortDebugString();
   PgsqlOps operations;
   PgObjectIds relations;
   std::move(ops).MoveTo(operations, relations);
@@ -1195,7 +1212,7 @@ Result<PerformFuture> PgSession::DoRunAsync(
       yb_non_ddl_txn_for_sys_tables_allowed || is_major_pg_version_upgrade_;
   const auto group_session_type = VERIFY_RESULT(GetRequiredSessionType(
       *pg_txn_manager_, *first_table_op.table, **first_table_op.operation,
-      non_ddl_txn_for_sys_tables_allowed));
+      non_ddl_txn_for_sys_tables_allowed, pg_txn_manager_->EnableTableLocking()));
   auto table_op = generator();
   RunHelper runner(
       this, group_session_type, in_txn_limit, force_non_bufferable);
@@ -1211,7 +1228,8 @@ Result<PerformFuture> PgSession::DoRunAsync(
         const auto& table = *table_op.table;
         const auto& op = *table_op.operation;
         const auto session_type = VERIFY_RESULT(GetRequiredSessionType(
-            *pg_txn_manager_, table, *op, non_ddl_txn_for_sys_tables_allowed));
+            *pg_txn_manager_, table, *op, non_ddl_txn_for_sys_tables_allowed,
+            pg_txn_manager_->EnableTableLocking()));
         RSTATUS_DCHECK_EQ(
             session_type, group_session_type,
             IllegalState, "Operations on different sessions can't be mixed");

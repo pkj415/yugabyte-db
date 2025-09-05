@@ -310,6 +310,14 @@ class Batcher : public Runnable, public std::enable_shared_from_this<Batcher> {
     object_locking_txn_meta_ = object_locking_txn_meta;
   }
 
+  void SetTxnMetaForCatalogReads(const TransactionMetadata& txn_meta) {
+    txn_meta_for_catalog_reads_ = txn_meta;
+  }
+
+  void SetSubTxnMetaForCatalogReads(const SubTransactionMetadataPB& subtxn_meta) {
+    subtxn_meta_for_catalog_reads_ = subtxn_meta;
+  }
+
  private:
   friend class RefCountedThreadSafe<Batcher>;
   friend class AsyncRpc;
@@ -430,6 +438,10 @@ class Batcher : public Runnable, public std::enable_shared_from_this<Batcher> {
   std::optional<TransactionMetadata> background_transaction_meta_ = std::nullopt;
 
   std::optional<TransactionMetadata> object_locking_txn_meta_;
+
+  std::optional<TransactionMetadata> txn_meta_for_catalog_reads_;
+
+  std::optional<SubTransactionMetadataPB> subtxn_meta_for_catalog_reads_;
 
   DISALLOW_COPY_AND_ASSIGN(Batcher);
 };

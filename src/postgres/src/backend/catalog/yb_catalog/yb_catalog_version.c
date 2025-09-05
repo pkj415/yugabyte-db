@@ -33,6 +33,7 @@
 #include "nodes/makefuncs.h"
 #include "optimizer/cost.h"
 #include "pg_yb_utils.h"
+#include "storage/lmgr.h"
 #include "utils/catcache.h"
 #include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
@@ -114,10 +115,9 @@ YbMaybeLockMasterCatalogVersion()
 	 * (2) We enable this feature only if the invalidation messages are used and per-database catalog
 	 *		 version mode is enabled.
 	 *
-	 * TODO(#27037): Re-enable table locks check when concurrent DDL is ready.
 	 */
 	if (yb_user_ddls_preempt_auto_analyze &&
-	/* !*YBCGetGFlags()->enable_object_locking_for_table_locks && */
+		!YbIsObjectLockingEnabled() &&
 		YbIsInvalidationMessageEnabled() && YBIsDBCatalogVersionMode())
 	{
 		elog(DEBUG3, "Locking catalog version for db oid %d", MyDatabaseId);
@@ -297,6 +297,32 @@ YbCallNewSQLIncrementCatalogVersionHelper(Oid functionId,
 
 	if (!snapshot_set)
 		PushActiveSnapshot(GetTransactionSnapshot());
+
+	/*
+	 * With object locking, concurrent DDLs could increment the catalog version. To ensure that
+	 * concurrent DDLs don't read a stale catalog version and override it, reset the catalog snapshot.
+	 *
+	 * NOTE: With expression pushdown, the write request for the catalog version increment would
+	 * perform the read too and that would use the transaction read point (which could be very old).
+	 * Only pure catalog reads to master use the CatalogSnapshot. So, to ensure that the catalog
+	 * snapshot is used to perform the read instead of the transaction snapshot, expression push down
+	 * is disabled for the catalog version table when object locking is enabled.
+	 *
+	 * Also, we can be sure that the catalog version is not modified after we reset the catalog
+	 * snapshot because we already hold an exclusive lock on the catalog version table.
+	 */
+	if (YbIsObjectLockingEnabled())
+	{
+		elog(LOG, "Invalidating catalog snapshot before catalog version increment");
+		InvalidateCatalogSnapshot();
+
+		/*
+		 * TODO: The sleep is added to avoid read restart errors on the catalog version due to
+		 * concurrent DDLs. Remove it.
+		 */
+		sleep(1);
+	}
+
 	volatile uint64_t new_version;
 
 	PG_TRY();
@@ -431,6 +457,8 @@ YbIncrementMasterDBCatalogVersionTableEntryImpl(Oid db_oid,
 {
 	Assert(YbGetCatalogVersionType() == CATALOG_VERSION_CATALOG_TABLE);
 
+	LockRelationOid(YBCatalogVersionRelationId, ExclusiveLock);
+
 	if (YbIsInvalidationMessageEnabled())
 	{
 		Oid			func_oid = is_global_ddl ? YbGetNewIncrementAllCatalogVersionsFunctionOid()
@@ -438,6 +466,7 @@ YbIncrementMasterDBCatalogVersionTableEntryImpl(Oid db_oid,
 
 		if (OidIsValid(func_oid) && YbInvalidationMessagesTableExists())
 		{
+			LockRelationOid(YbInvalidationMessagesRelationId, ExclusiveLock);
 			bool		is_null = false;
 			Datum		messages = GetInvalidationMessages(invalMessages, nmsgs, &is_null);
 			int			expiration_secs = yb_invalidation_message_expiration_secs;
@@ -645,6 +674,7 @@ YbIncrementMasterCatalogVersionTableEntry(bool is_breaking_change,
 										  const SharedInvalidationMessage *invalMessages,
 										  int nmsgs)
 {
+	elog(DEBUG2, "YbIncrementMasterCatalogVersionTableEntry");
 	YbResetNewCatalogVersion();
 	if (YbGetCatalogVersionType() != CATALOG_VERSION_CATALOG_TABLE)
 		return false;

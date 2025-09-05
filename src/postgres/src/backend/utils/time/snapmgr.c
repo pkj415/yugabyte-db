@@ -326,7 +326,7 @@ YBCOnActiveSnapshotChange()
 }
 
 void
-YbLogSnapshotData(const char *msg, SnapshotData *snap, bool log_stack_trace)
+YbLogSnapshotData(const char *msg, const SnapshotData *snap, bool log_stack_trace)
 {
 	elog(YbSnapshotMgmtLogLevel(),
 		 "%s read point: %" PRIu64 ", effective isolation level: %d. %s",
@@ -428,6 +428,14 @@ GetTransactionSnapshot(void)
 	return CurrentSnapshot;
 }
 
+Snapshot
+ResetTransactionSnapshot()
+{
+	elog(DEBUG2, "ResetTransactionSnapshot");
+	CurrentSnapshot = GetSnapshotData(&CurrentSnapshotData);
+	return CurrentSnapshot;
+}
+
 /*
  * GetLatestSnapshot
  *		Get a snapshot that is up-to-date as of the current instant,
@@ -504,6 +512,7 @@ GetCatalogSnapshot(Oid relid)
 	 * This is the primary reason for needing to reset the system caches after
 	 * finishing decoding.
 	 */
+	elog(YbSnapshotMgmtLogLevel(), "GetCatalogSnapshot: relid: %d", relid);
 	if (HistoricSnapshotActive())
 		return HistoricSnapshot;
 
@@ -534,7 +543,7 @@ GetNonHistoricCatalogSnapshot(Oid relid)
 	if (CatalogSnapshot == NULL)
 	{
 		/* Get new snapshot. */
-		CatalogSnapshot = GetSnapshotData(&CatalogSnapshotData);
+		CatalogSnapshot = YbGetSnapshotDataImpl(&CatalogSnapshotData, true /* yb_is_catalog_snapshot */ );
 
 		/*
 		 * Make sure the catalog snapshot will be accounted for in decisions
@@ -567,12 +576,16 @@ GetNonHistoricCatalogSnapshot(Oid relid)
 void
 InvalidateCatalogSnapshot(void)
 {
+	elog(YbSnapshotMgmtLogLevel(), "InvalidateCatalogSnapshot");
 	if (CatalogSnapshot)
 	{
 		pairingheap_remove(&RegisteredSnapshots, &CatalogSnapshot->ph_node);
 		CatalogSnapshot = NULL;
 		SnapshotResetXmin();
 	}
+
+	if (IsYugaByteEnabled() && YbIsObjectLockingEnabled())
+		YBCPgResetCatalogReadTime();
 }
 
 /*

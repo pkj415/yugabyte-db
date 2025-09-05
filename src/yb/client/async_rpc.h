@@ -65,6 +65,7 @@ struct AsyncRpcData {
   InFlightOps ops;
   bool need_metadata = false;
   bool use_async_write = false;
+  bool is_catalog_read = false;
 };
 
 struct FlushExtraResult {

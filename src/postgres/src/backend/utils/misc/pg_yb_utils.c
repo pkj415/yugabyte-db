@@ -7809,7 +7809,7 @@ YbCalculateTimeDifferenceInMicros(TimestampTz yb_start_time)
 }
 
 static bool
-YbIsDDLOrInitDBMode()
+YbIsSeparateDDLOrInitDBMode()
 {
 	return (YBCPgIsDdlMode() && !YBCPgIsDdlModeWithRegularTransactionBlock()) || YBCIsInitDbModeEnvVarSet();
 }
@@ -7817,20 +7817,19 @@ YbIsDDLOrInitDBMode()
 bool
 YbIsReadCommittedTxn()
 {
-	return IsYBReadCommitted() && !YbIsDDLOrInitDBMode();
+	return IsYBReadCommitted() && !YbIsSeparateDDLOrInitDBMode();
 }
 
 bool
 YbSkipPgSnapshotManagement()
 {
 	/*
-	 * YSQL doesn't use Pg's snapshot management in DDL or initdb mode. Also, for SERIALIZABLE
+	 * YSQL doesn't use Pg's snapshot management for separate DDL transactions (i.e., DDLs that are
+	 * not part of a regular transaction block) or in initdb mode. Also, for SERIALIZABLE
 	 * isolation level, YSQL doesn't use SSI. Instead it uses 2 phase locking and reads the latest
 	 * data on DocDB always.
-	 *
-	 * TODO: Integrate with Pg's snapshot management for DDLs.
 	 */
-	return YbIsDDLOrInitDBMode() || IsolationIsSerializable();
+	return YbIsSeparateDDLOrInitDBMode() || IsolationIsSerializable();
 }
 
 static YbOptionalReadPointHandle
@@ -7907,6 +7906,12 @@ bool
 YbUseFastBackwardScan()
 {
 	return *(YBCGetGFlags()->ysql_use_fast_backward_scan);
+}
+
+bool
+YbIsObjectLockingEnabled()
+{
+	return enable_object_locking_infra && *YBCGetGFlags()->enable_object_locking_for_table_locks;
 }
 
 bool

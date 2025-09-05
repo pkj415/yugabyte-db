@@ -147,6 +147,12 @@ TAG_FLAG(TEST_hide_details_for_pg_regress, hidden);
 DEFINE_NON_RUNTIME_uint32(max_replication_slots, 10,
      "Controls the maximum number of replication slots that are allowed to exist on a cluster.");
 
+DEFINE_NON_RUNTIME_bool(TEST_force_consistent_snapshot_for_ddl_reads_writes, false,
+    "When enable_object_locking_for_table_locks is set, we use kMax as the hybrid time for DDL "
+    "reads and writes. This flag is just present to provide a way to disable this behavior and "
+    "revert back to using a single consistent read hybrid time for a DDL's reads and writes.");
+TAG_FLAG(TEST_force_consistent_snapshot_for_ddl_reads_writes, hidden);
+
 // The following flags related to the cloud, region and availability zone that an instance is
 // started in. These are passed in from whatever provisioning mechanics start the servers. They
 // are used for generic placement policies on table creation and tablet load balancing, to

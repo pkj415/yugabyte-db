@@ -67,6 +67,7 @@ TAG_FLAG(ysql_yb_follower_reads_behavior_before_fixing_20482, advanced);
                      << "; query: { " << ::yb::pggate::GetDebugQueryString(pg_callbacks_) << " }; "
 
 DECLARE_uint64(max_clock_skew_usec);
+DECLARE_bool(TEST_force_consistent_snapshot_for_ddl_reads_writes);
 
 namespace {
 
@@ -764,7 +765,8 @@ Status PgTxnManager::SetupPerformOptions(
     read_time_manipulation_ = tserver::ReadTimeManipulation::NONE;
     read_time_action.reset();
   }
-  if (!IsDdlModeWithSeparateTransaction()) {
+
+  if (!IsDdlMode()) {
     // The state in read_time_manipulation_ is only for kPlain transactions. And if YSQL switches to
     // kDdl mode for sometime, we should keep read_time_manipulation_ as is so that once YSQL
     // switches back to kDdl mode, the read_time_manipulation_ is not lost.
@@ -777,8 +779,7 @@ Status PgTxnManager::SetupPerformOptions(
     // Do not clamp in the serializable case since
     // - SERIALIZABLE reads do not pick read time until later.
     // - SERIALIZABLE reads do not observe read restarts anyways.
-    if (!IsDdlMode() &&
-        yb_read_after_commit_visibility == YB_RELAXED_READ_AFTER_COMMIT_VISIBILITY
+    if (yb_read_after_commit_visibility == YB_RELAXED_READ_AFTER_COMMIT_VISIBILITY
         && isolation_level_ != IsolationLevel::SERIALIZABLE_ISOLATION)
       // We clamp uncertainty window when
       // - either we are working with a read only txn

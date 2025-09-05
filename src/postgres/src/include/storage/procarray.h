@@ -44,6 +44,7 @@ extern void KnownAssignedTransactionIdsIdleMaintenance(void);
 extern int	GetMaxSnapshotXidCount(void);
 extern int	GetMaxSnapshotSubxidCount(void);
 
+extern Snapshot YbGetSnapshotDataImpl(Snapshot snapshot, bool yb_is_catalog_snapshot);
 extern Snapshot GetSnapshotData(Snapshot snapshot);
 
 extern bool ProcArrayInstallImportedXmin(TransactionId xmin,

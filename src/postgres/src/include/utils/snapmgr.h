@@ -172,6 +172,7 @@ extern struct HTAB *HistoricSnapshotGetTupleCids(void);
 extern void SetupHistoricSnapshot(Snapshot snapshot_now, struct HTAB *tuplecids);
 extern void TeardownHistoricSnapshot(bool is_error);
 extern bool HistoricSnapshotActive(void);
+extern Snapshot ResetTransactionSnapshot(void);
 
 extern Size EstimateSnapshotSpace(Snapshot snapshot);
 extern void SerializeSnapshot(Snapshot snapshot, char *start_address);
@@ -182,6 +183,6 @@ extern void RestoreTransactionSnapshot(Snapshot snapshot, void *source_pgproc);
 extern void PopAllActiveSnapshots(void);
 extern void YBCheckSnapshotsAllowed(bool check_isolation_level);
 extern void YbInitSnapshot(Snapshot snap, YbOptionalReadPointHandle read_point_handle);
-extern void YbLogSnapshotData(const char *msg, SnapshotData *snap, bool log_stack_trace);
+extern void YbLogSnapshotData(const char *msg, const SnapshotData *snap, bool log_stack_trace);
 
 #endif							/* SNAPMGR_H */

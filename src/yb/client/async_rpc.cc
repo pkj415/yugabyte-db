@@ -436,7 +436,7 @@ AsyncRpcBase<Req, Resp>::AsyncRpcBase(
   if (!metadata.transaction.transaction_id.IsNil()) {
     SetMetadata(metadata, data.need_metadata, &req_);
     bool serializable = metadata.transaction.isolation == IsolationLevel::SERIALIZABLE_ISOLATION;
-    LOG_IF(DFATAL, has_read_time && serializable)
+    LOG_IF(DFATAL, has_read_time && serializable && !data.is_catalog_read)
         << "Read time should NOT be specified for serializable isolation: "
         << read_point->GetReadTime().ToString();
   }
