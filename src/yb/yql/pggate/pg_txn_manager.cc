@@ -416,25 +416,38 @@ Status PgTxnManager::CalculateIsolation(
     read_only_op = false;
   }
 
-  // Using pg_isolation_level_, read_only_, and deferrable_, determine the effective isolation level
-  // to use at the DocDB layer, and the "deferrable" flag.
+  // Serializable isolation transactions can be internally executed with snapshot isolation if
+  // no writes are performed in the transaction. This is because without writes, the write skew
+  // anomaly is not possible. This way we don't have to write read intents and we get higher
+  // peformance. The resulting execution is still serializable: the order of transactions is the
+  // order of timestamps, i.e. read timestamps (for read-only transactions executed at snapshot
+  // isolation) and commit timestamps of serializable transactions.
   //
-  // Effective isolation means that sometimes SERIALIZABLE reads are internally executed as snapshot
-  // isolation reads. This way we don't have to write read intents and we get higher peformance.
-  // The resulting execution is still serializable: the order of transactions is the order of
-  // timestamps, i.e. read timestamps (for read-only transactions executed at snapshot isolation)
-  // and commit timestamps of serializable transactions.
-  //
-  // The "deferrable" flag that in SERIALIZABLE DEFERRABLE READ ONLY mode we will choose the read
-  // timestamp as global_limit to avoid the possibility of read restarts. This results in waiting
-  // out the maximum clock skew and is appropriate for non-latency-sensitive operations.
+  // We can fall back to snapshot isolation in two cases:
+  // 1. Explicit READ ONLY transaction (read_only_ is true) or
+  // 2. Implicit read-only standalone statement outside a transaction block.
 
-  const IsolationLevel docdb_isolation =
-      (pg_isolation_level_ == PgIsolationLevel::SERIALIZABLE) && !read_only_
-          ? IsolationLevel::SERIALIZABLE_ISOLATION
-          : (pg_isolation_level_ == PgIsolationLevel::READ_COMMITTED
-              ? IsolationLevel::READ_COMMITTED
-              : IsolationLevel::SNAPSHOT_ISOLATION);
+  const bool effectively_read_only_txn = read_only_ || (!in_txn_blk_ && read_only_stmt_);
+  IsolationLevel docdb_isolation;
+  switch (pg_isolation_level_) {
+    case PgIsolationLevel::SERIALIZABLE:
+      if (effectively_read_only_txn) {
+        docdb_isolation = IsolationLevel::SNAPSHOT_ISOLATION;
+      } else {
+        docdb_isolation = IsolationLevel::SERIALIZABLE_ISOLATION;
+      }
+      break;
+    case PgIsolationLevel::READ_COMMITTED:
+      docdb_isolation = IsolationLevel::READ_COMMITTED;
+      break;
+    default:
+      docdb_isolation = IsolationLevel::SNAPSHOT_ISOLATION;
+      break;
+  }
+
+  // The deferrable mode allows us to wait out the clock skew to avoid read restarts. This is
+  // done by choosing the read timestamp as global_limit.
+  //
   // Users can use the deferrable mode via:
   // (1) DEFERRABLE READ ONLY setting in transaction blocks
   // (2) SET yb_read_after_commit_visibility = 'deferred';
@@ -461,9 +474,9 @@ Status PgTxnManager::CalculateIsolation(
       return STATUS_FORMAT(
           IllegalState,
           "Attempt to change effective isolation from $0 to $1 in the middle of a transaction. "
-          "Postgres-level isolation: $2; read_only: $3.",
+          "Postgres-level isolation: $2; read_only: $3; in_txn_blk: $4; read_only_stmt: $5.",
           isolation_level_, IsolationLevel_Name(docdb_isolation), pg_isolation_level_,
-          read_only_);
+          read_only_, in_txn_blk_, read_only_stmt_);
     }
     return Status::OK();
   }

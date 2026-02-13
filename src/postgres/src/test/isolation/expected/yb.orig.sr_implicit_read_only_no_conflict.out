@@ -1,0 +1,26 @@
+Parsed test spec with 2 sessions
+
+starting permutation: s1_begin s1_update s2_select s1_commit
+step s1_begin: BEGIN ISOLATION LEVEL SERIALIZABLE;
+step s1_update: UPDATE test SET v = 2 WHERE k = 1;
+step s2_select: SELECT * FROM test WHERE k = 1;
+k|v
+-+-
+1|1
+(1 row)
+
+step s1_commit: COMMIT;
+
+starting permutation: s1_begin s1_update s2_begin s2_select_in_txn s1_commit s2_commit
+step s1_begin: BEGIN ISOLATION LEVEL SERIALIZABLE;
+step s1_update: UPDATE test SET v = 2 WHERE k = 1;
+step s2_begin: BEGIN;
+step s2_select_in_txn: SELECT * FROM test WHERE k = 1; <waiting ...>
+step s1_commit: COMMIT;
+step s2_select_in_txn: <... completed>
+k|v
+-+-
+1|2
+(1 row)
+
+step s2_commit: COMMIT;
