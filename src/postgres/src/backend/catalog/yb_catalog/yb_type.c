@@ -391,8 +391,9 @@ YbBPCharToDatum(const char *data, int64 bytes, const YbcPgTypeAttrs *type_attrs)
 void
 YbDatumToVarchar(Datum datum, char **data, int64 *bytes)
 {
-	*data = TextDatumGetCString(datum);
-	*bytes = strlen(*data);
+	datum = PointerGetDatum(PG_DETOAST_DATUM(datum));
+	*data = VARDATA_ANY(datum);
+	*bytes = VARSIZE_ANY_EXHDR(datum);
 }
 
 Datum
