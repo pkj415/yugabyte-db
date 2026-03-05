@@ -133,6 +133,11 @@ DEFINE_test_flag(int32, delay_update_consensus_requests_ms, 0,
     "Delay execution of UpdateConsensus() requests for specified amount of milliseconds during "
     "tests");
 
+DEFINE_test_flag(int32, random_delay_update_consensus_max_ms, 0,
+    "If non-zero, adds a random delay between 0 and this value (in milliseconds) to "
+    "UpdateConsensus() requests. Useful for surfacing bugs related to safe time lag during "
+    "active raft replication. If delay_update_consensus_requests_ms is non-zero, this flag is ignored.");
+
 DEFINE_test_flag(int32, follower_reject_update_consensus_requests_seconds, 0,
                  "Whether a follower will return an error for all UpdateConsensus() requests for "
                  "the first TEST_follower_reject_update_consensus_requests_seconds seconds after "
@@ -1599,6 +1604,12 @@ Status RaftConsensus::Update(
       std::this_thread::sleep_for(delay.ToSteadyDuration());
     } else if (FLAGS_TEST_delay_update_consensus_requests_ms != 0) {
       std::this_thread::sleep_for(1ms * FLAGS_TEST_delay_update_consensus_requests_ms);
+    } else if (FLAGS_TEST_random_delay_update_consensus_max_ms > 0) {
+      auto random_delay_ms = RandomUniformInt(0, FLAGS_TEST_random_delay_update_consensus_max_ms);
+      if (random_delay_ms > 0) {
+        LOG(INFO) << "Piyush - Sleeping for " << random_delay_ms << "ms";
+        std::this_thread::sleep_for(1ms * random_delay_ms);
+      }
     }
   }
 
