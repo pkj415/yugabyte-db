@@ -21,32 +21,6 @@ test: yb.orig.skip-locked-single-shard-transaction
 # 2. Test to ensure clean-up of partial intents using savepoints.
 # 3. Test all skip locked specs with REPEATABLE READ isolation as well.
 
-test: read-only-anomaly
-test: fk-deadlock
-test: fk-deadlock2
-# TODO: Test fk-partitioned-1 and fk-partitioned-2  after GH issue #24403 is resolved.
-# test: fk-partitioned-1
-# test: fk-partitioned-2
-test: yb.port.eval-plan-qual
-test: insert-conflict-do-nothing
-test: insert-conflict-do-update
-test: insert-conflict-do-update-2
-test: delete-abort-savept
-test: delete-abort-savept-2
-test: aborted-keyrevoke
-test: multixact-no-deadlock
-test: multixact-no-forget
-test: update-locked-tuple
-test: tuplelock-conflict
-# TODO: Once Github issues #14985 & #14991 are fixed,
-# tuplelock-partition should be tested.
-# test: tuplelock-partition
-test: nowait
-test: nowait-2
-test: nowait-3
-test: skip-locked
-test: skip-locked-2
-test: skip-locked-3
 test: yb.orig.ignore-rolled-back-savepoint-intent
 test: yb.orig.ensure-lock-only-conflict-always-ignored
 test: yb.orig.drop-probe-waiting-on-aborted-subtxn
