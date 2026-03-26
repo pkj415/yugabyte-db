@@ -89,6 +89,10 @@ DEFINE_test_flag(bool, writequery_stuck_from_callback_leak, false,
 DECLARE_bool(batch_tablet_metrics_update);
 DECLARE_bool(ysql_analyze_dump_metrics);
 DECLARE_bool(ysql_enable_packed_row);
+DECLARE_bool(TEST_respond_read_write_with_failure);
+DEFINE_test_flag(double, respond_read_restart_error_probability, 0.0,
+  "Probability to respond with read restart error. Ensure respond_read_write_with_failure is set "
+  "to true.");
 
 namespace yb {
 namespace tablet {
@@ -1114,6 +1118,21 @@ Status WriteQuery::DoCompleteExecute() {
         doc_ops_, read_operation_data, tablet->doc_db(), &tablet->GetSchemaPackingProvider(),
         scoped_read_operation_, &write_batch, init_marker_behavior,
         tablet->monotonic_counter(), &read_restart_data_, tablet->metadata()->table_name()));
+
+    if (PREDICT_FALSE(FLAGS_TEST_respond_read_write_with_failure &&
+        !allow_immediate_read_restart_ && !read_restart_data_.is_valid())) {
+      VLOG(2) << "Responding with a test generated read restart error";
+      double r = RandomUniformReal<double>();
+      if (r >= FLAGS_TEST_respond_read_restart_error_probability) {
+        break;
+      }
+      read_restart_data_.restart_time = read_operation_data.read_time.read;
+      read_restart_data_.restart_time = read_restart_data_.restart_time.AddMicroseconds(1000);
+      if (read_restart_data_.restart_time < read_operation_data.read_time.global_limit) {
+        break;
+      }
+      read_restart_data_ = ReadRestartData();
+    }
 
     // For serializable isolation we don't fix read time, so could do read restart locally,
     // instead of failing whole transaction.

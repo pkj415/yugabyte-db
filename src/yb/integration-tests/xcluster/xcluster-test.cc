@@ -104,7 +104,8 @@ DECLARE_bool(TEST_exit_unfinished_deleting);
 DECLARE_bool(TEST_exit_unfinished_merging);
 DECLARE_bool(TEST_fail_setup_system_universe_replication);
 DECLARE_bool(TEST_hang_wait_replication_drain);
-DECLARE_double(TEST_respond_write_failed_probability);
+DECLARE_bool(TEST_respond_read_write_with_failure);
+DECLARE_double(TEST_respond_write_other_error_probability);
 DECLARE_bool(TEST_xcluster_write_hybrid_time);
 DECLARE_uint64(TEST_yb_inbound_big_calls_parse_delay_ms);
 DECLARE_bool(allow_insecure_connections);
@@ -2396,7 +2397,8 @@ TEST_P(XClusterTest, ApplyOperationsRandomFailures) {
   ASSERT_OK(CorrectlyPollingAllTablets(5));
   ASSERT_OK(CorrectlyPollingAllTablets(producer_cluster(), 3));
 
-  ANNOTATE_UNPROTECTED_WRITE(FLAGS_TEST_respond_write_failed_probability) = 0.25;
+  ANNOTATE_UNPROTECTED_WRITE(FLAGS_TEST_respond_read_write_with_failure) = true;
+  ANNOTATE_UNPROTECTED_WRITE(FLAGS_TEST_respond_write_other_error_probability) = 0.25;
 
   // Write 1000 entries to each cluster.
   Status t1_s, t2_s;

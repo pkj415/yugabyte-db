@@ -104,7 +104,8 @@ DECLARE_bool(ysql_enable_auto_analyze);
 DECLARE_bool(ysql_yb_ddl_transaction_block_enabled);
 DECLARE_bool(enable_object_locking_for_table_locks);
 
-DECLARE_double(TEST_respond_write_failed_probability);
+DECLARE_bool(TEST_respond_read_write_with_failure);
+DECLARE_double(TEST_respond_write_other_error_probability);
 DECLARE_double(TEST_transaction_ignore_applying_probability);
 
 DECLARE_int32(TEST_inject_mvcc_delay_add_leader_pending_ms);
@@ -719,7 +720,8 @@ TEST_F(PgMiniTest, WriteRetry) {
 
   ASSERT_OK(conn.Execute("CREATE TABLE t (key INT PRIMARY KEY)"));
 
-  ANNOTATE_UNPROTECTED_WRITE(FLAGS_TEST_respond_write_failed_probability) = 0.25;
+  ANNOTATE_UNPROTECTED_WRITE(FLAGS_TEST_respond_read_write_with_failure) = true;
+  ANNOTATE_UNPROTECTED_WRITE(FLAGS_TEST_respond_write_other_error_probability) = 0.25;
 
   LOG(INFO) << "Insert " << kKeys << " keys";
   for (int key = 0; key != kKeys; ++key) {
@@ -728,7 +730,7 @@ TEST_F(PgMiniTest, WriteRetry) {
                 status.ToString().find("Duplicate request") != std::string::npos) << status;
   }
 
-  ANNOTATE_UNPROTECTED_WRITE(FLAGS_TEST_respond_write_failed_probability) = 0;
+  ANNOTATE_UNPROTECTED_WRITE(FLAGS_TEST_respond_write_failed_probability) = false;
 
   auto result = ASSERT_RESULT(conn.FetchMatrix("SELECT * FROM t ORDER BY key", kKeys, 1));
   for (int key = 0; key != kKeys; ++key) {

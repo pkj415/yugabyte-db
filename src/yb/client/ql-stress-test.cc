@@ -72,7 +72,8 @@ DECLARE_bool(allow_preempting_compactions);
 DECLARE_bool(detect_duplicates_for_retryable_requests);
 DECLARE_bool(enable_ondisk_compression);
 DECLARE_bool(ycql_enable_packed_row);
-DECLARE_double(TEST_respond_write_failed_probability);
+DECLARE_bool(TEST_respond_read_write_with_failure);
+DECLARE_double(TEST_respond_write_other_error_probability);
 DECLARE_double(TEST_simulate_lookup_partition_list_mismatch_probability);
 DECLARE_double(transaction_max_missed_heartbeat_periods);
 DECLARE_int32(TEST_max_write_waiters);
@@ -346,7 +347,8 @@ void QLStressTest::TestRetryWrites(bool restarts) {
   // Used only when table is transactional.
   const double kTransactionalWriteProbability = 0.5;
 
-  ANNOTATE_UNPROTECTED_WRITE(FLAGS_TEST_respond_write_failed_probability) = 0.25;
+  ANNOTATE_UNPROTECTED_WRITE(FLAGS_TEST_respond_read_write_with_failure) = true;
+  ANNOTATE_UNPROTECTED_WRITE(FLAGS_TEST_respond_write_other_error_probability) = 0.25;	
 
   const bool transactional = table_.table()->schema().table_properties().is_transactional();
   std::optional<TransactionManager> txn_manager;

@@ -203,11 +203,20 @@ DEFINE_RUNTIME_int32(index_backfill_wait_for_old_txns_ms, 0,
     "commits from blocking the index backfill forever.");
 TAG_FLAG(index_backfill_wait_for_old_txns_ms, evolving);
 
-DEFINE_test_flag(double, respond_write_failed_probability, 0.0,
-    "Probability to respond that write request is failed");
+DEFINE_test_flag(bool, respond_read_write_with_failure, false,
+  "Respond to read/write rpcs with failure.");
 
-DEFINE_test_flag(double, respond_write_with_abort_probability, 0.0,
-    "Probability to respond that write request is aborted");
+DEFINE_test_flag(double, respond_write_conflict_error_probability, 0.0,
+  "Probability to respond write request with conflict error. Ensure "
+  "respond_read_write_with_failure is set to true.");
+
+DEFINE_test_flag(double, respond_write_abort_error_probability, 0.0,
+  "Probability to respond write request with abort error. Ensure "
+  "respond_read_write_with_failure is set to true.");
+
+DEFINE_test_flag(double, respond_write_other_error_probability, 0.0,
+  "Probability to respond write request with other error. Ensure "
+  "respond_read_write_with_failure is set to true.");
 
 DEFINE_test_flag(bool, rpc_delete_tablet_fail, false, "Should delete tablet RPC fail.");
 
@@ -2669,19 +2678,55 @@ Status TabletServiceImpl::PerformWrite(
       context_ptr.get(), resp);
   query->set_client_request(*req);
 
-  if (RandomActWithProbability(FLAGS_TEST_respond_write_failed_probability)) {
-    LOG(INFO) << "Responding with a failure to " << req->ShortDebugString();
-    tablet.peer->WriteAsync(std::move(query));
-    auto status = STATUS(LeaderHasNoLease, "TEST: Random failure");
-    SetupErrorAndRespond(resp->mutable_error(), std::move(status), context_ptr.get());
-    return Status::OK();
-  }
+  if (PREDICT_FALSE(FLAGS_TEST_respond_read_write_with_failure)) {
+    double p_conflict = FLAGS_TEST_respond_write_conflict_error_probability;
+    double p_abort = FLAGS_TEST_respond_write_abort_error_probability;
+    double p_other_error = FLAGS_TEST_respond_write_other_error_probability;
 
-  if (RandomActWithProbability(FLAGS_TEST_respond_write_with_abort_probability)) {
-    LOG(INFO) << "Responding with transaction aborted failure to " << req->ShortDebugString();
-    SetupErrorAndRespond(resp->mutable_error(),
-        CreateExpiredStatus("Transaction expired or aborted by a conflict"), context_ptr.get());
-    return Status::OK();
+    double r = RandomUniformReal<double>();
+    if (r < p_conflict) {
+      VLOG(2) << "Responding with a test generated conflict error";
+      SetupErrorAndRespond(resp->mutable_error(), STATUS_EC_FORMAT(
+          TryAgain, PgsqlError(YBPgErrorCode::YB_PG_YB_TXN_CONFLICT),
+          "Test generated transaction conflict error"), context_ptr.get());
+      return Status::OK();
+    } else if (r < p_conflict + p_abort) {
+      VLOG(2) << "Responding with a test generated transaction aborted error";
+      SetupErrorAndRespond(resp->mutable_error(), STATUS_EC_FORMAT(
+          Expired, PgsqlError(YBPgErrorCode::YB_PG_YB_TXN_ABORTED),
+          "Test generated transaction abort error"), context_ptr.get());
+      return Status::OK();
+    } else if (r < p_conflict + p_abort + p_other_error) {
+      double r2 = RandomUniformReal<double>();
+      if (r2 < 0.25) {
+        // Send a retryable error even after the write has succeeded.
+        VLOG(2) << "Responding with a test generated retryable error even after the write has "
+                  << "succeeded";
+        tablet.peer->WriteAsync(std::move(query));
+        SetupErrorAndRespond(resp->mutable_error(), STATUS(
+            LeaderHasNoLease, "Test generated leader has no lease error"), context_ptr.get());
+      } else if (r2 < 0.50) {
+        // Send a retryable error when the write has not yet completed.
+        VLOG(2) << "Responding with a test generated retryable error when the write has not yet "
+                  << "completed";
+        SetupErrorAndRespond(resp->mutable_error(), STATUS(
+            LeaderHasNoLease, "Test generated leader has no lease error"), context_ptr.get());
+      } else if (r2 < 0.75) {
+        // Send a non-retryable error even after the write has succeeded.
+        VLOG(2) << "Responding with a test generated non-retryable error even after the write "
+                  << "has succeeded";
+        tablet.peer->WriteAsync(std::move(query));
+        SetupErrorAndRespond(resp->mutable_error(), STATUS(
+            InternalError, "Test generated internal error"), context_ptr.get());
+      } else {
+        // Send a non-retryable error when the write has not yet completed.
+        VLOG(2) << "Responding with a test generated non-retryable error when the write has not "
+                  << "yet completed";
+        SetupErrorAndRespond(resp->mutable_error(), STATUS(
+            InternalError, "Test generated internal error"), context_ptr.get());
+      }
+      return Status::OK();
+    }
   }
 
   FillTabletConsensusInfoIfRequestOpIdStale(tablet.peer, req, resp);

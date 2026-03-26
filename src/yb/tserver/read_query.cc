@@ -66,6 +66,9 @@ DEFINE_RUNTIME_bool(ysql_follower_reads_avoid_waiting_for_safe_time, true,
     "faster than waiting for safe time to catch up.");
 TAG_FLAG(ysql_follower_reads_avoid_waiting_for_safe_time, advanced);
 
+DECLARE_bool(TEST_respond_read_write_with_failure);
+DECLARE_double(TEST_respond_read_restart_error_probability);
+
 namespace yb {
 namespace tserver {
 
@@ -525,7 +528,21 @@ Status ReadQuery::Complete() {
     resp_->Clear();
     context_.sidecars().Reset();
     VLOG(1) << "Read time: " << read_time_ << ", safe: " << safe_ht_to_read_;
-    const auto result = VERIFY_RESULT(DoRead());
+    auto result = VERIFY_RESULT(DoRead());
+
+    if (PREDICT_FALSE(FLAGS_TEST_respond_read_write_with_failure &&
+        !allow_retry_ && !result.restart_time)) {
+      double r = RandomUniformReal<double>();
+      if (r < FLAGS_TEST_respond_read_restart_error_probability) {
+        VLOG(2) << "Responding with a test generated read restart error";
+        result.restart_time = read_time_;
+        result.restart_time.read = result.restart_time.read.AddMicroseconds(1000);
+      }
+      if (result.restart_time.read >= result.restart_time.global_limit) {
+        result.restart_time = ReadHybridTime();
+      }
+    }
+
     if (allow_retry_ && read_time_ && read_time_ == result.restart_time) {
       YB_LOG_EVERY_N_SECS(DFATAL, 5)
           << __func__ << ", restarting read with the same read time: " << result.restart_time;

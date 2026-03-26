@@ -23,7 +23,8 @@
 
 DECLARE_bool(yb_enable_read_committed_isolation);
 DECLARE_string(ysql_pg_conf_csv);
-DECLARE_double(TEST_respond_write_with_abort_probability);
+DECLARE_bool(TEST_respond_read_write_with_failure);
+DECLARE_double(TEST_respond_write_abort_error_probability);
 
 namespace yb::pgwrapper {
 
@@ -77,7 +78,8 @@ TEST_F(PgCopyTest, TestRetriesAreDisabledForCopy) {
   const std::string kTable = "test";
   ASSERT_OK(conn.ExecuteFormat("CREATE TABLE $0 (k INT PRIMARY KEY, v INT)", kTable));
 
-  ANNOTATE_UNPROTECTED_WRITE(FLAGS_TEST_respond_write_with_abort_probability) = 0.2;
+  ANNOTATE_UNPROTECTED_WRITE(FLAGS_TEST_respond_read_write_with_failure) = true;
+  ANNOTATE_UNPROTECTED_WRITE(FLAGS_TEST_respond_write_abort_error_probability) = 0.2;
   const auto kRowsPerTransaction = 2;
   const auto kNumRows = 20;
   auto status = conn.CopyFromStdin(
