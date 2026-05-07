@@ -907,6 +907,8 @@ Status WriteQuery::DoExecute() {
   }
 
   if (!tablet->txns_enabled() || !transactional_table) {
+    VLOG(3) << "Skipping conflict resolution: txns_enabled=" << tablet->txns_enabled()
+             << ", transactional_table=" << transactional_table;
     CompleteExecute();
     return Status::OK();
   }
@@ -1004,6 +1006,7 @@ void WriteQuery::NonTransactionalConflictsResolved(HybridTime now, HybridTime re
   }
   auto tablet = *tablet_result;
 
+  VLOG(3) << "NonTransactionalConflictsResolved: now=" << now << ", result=" << result;
   if (now != result) {
     tablet->clock()->Update(result);
   }
@@ -1026,6 +1029,8 @@ void WriteQuery::TransactionalConflictsResolved() {
 }
 
 Status WriteQuery::DoTransactionalConflictsResolved() {
+  VLOG(3) << "TransactionalConflictsResolved, picking read time if necessary"
+           << ", read_time: " << (read_time_ ? read_time_.ToString() : "not set");
   RETURN_NOT_OK(PickReadTimeIfNecessary());
   CompleteExecute();
   return Status::OK();
@@ -1039,6 +1044,9 @@ Status WriteQuery::PickReadTimeIfNecessary() {
         {safe_time, tablet->clock()->NowRange().second});
     read_time_.local_limit = safe_time;
     metrics_->Increment(tablet::TabletCounters::kPickReadTimeOnDocDB);
+    VLOG(2) << "Picked read time on DocDB: " << read_time_
+             << ", safe_time: " << safe_time
+             << ", isolation_level: " << IsolationLevel_Name(isolation_level_);
     return Status::OK();
   }
   if (prepare_result_.need_read_snapshot &&
@@ -1124,6 +1132,9 @@ Status WriteQuery::DoCompleteExecute() {
       break;
     }
 
+    VLOG(2) << "Local read restart: old read time=" << read_operation_data.read_time.read
+             << ", restart_time=" << read_restart_data_.restart_time
+             << ", isolation=" << IsolationLevel_Name(isolation_level_);
     read_operation_data.read_time.read = read_restart_data_.restart_time;
     if (!local_limit_updated) {
       local_limit_updated = true;

@@ -617,6 +617,8 @@ Result<PgTableDescPtr> PgSession::LoadTable(const PgObjectId& table_id) {
 
 void PgSession::InvalidateTableCache(
     const PgObjectId& table_id, InvalidateOnPgClient invalidate_on_pg_client) {
+  VLOG(3) << "InvalidateTableCache: " << table_id
+           << ", invalidate_on_pg_client: " << invalidate_on_pg_client;
   if (invalidate_on_pg_client) {
     // Keep special record about this table_id, so when we would open this table again,
     // reopen flag will be sent to pg client service.
@@ -638,6 +640,9 @@ void PgSession::InvalidateAllTablesCache(uint64_t min_ysql_catalog_version) {
     return;
   }
 
+  VLOG(2) << "InvalidateAllTablesCache: advancing from version "
+           << table_cache_min_ysql_catalog_version_ << " to " << min_ysql_catalog_version
+           << ", clearing " << table_cache_.size() << " cached tables";
   table_cache_min_ysql_catalog_version_ = min_ysql_catalog_version;
   table_cache_.clear();
   tablespace_cache_.Clear();
@@ -660,11 +665,13 @@ Status PgSession::StartOperationsBuffering() {
   }
   Update(&buffering_settings_, 1 /* multiple */);
   buffering_enabled_ = true;
+  VLOG(3) << "Operations buffering started";
   return Status::OK();
 }
 
 Status PgSession::StopOperationsBuffering() {
   SCHECK(buffering_enabled_, IllegalState, "Buffering hasn't been started");
+  VLOG(3) << "Stopping operations buffering, pending ops: " << buffer_.Size();
   buffering_enabled_ = false;
   return ResultToStatus(FlushBufferedOperations(PgFlushDebugContext::EndOperationsBuffering()));
 }
@@ -880,7 +887,8 @@ Result<PerformFuture> PgSession::Perform(BufferableOperations&& ops, PerformOpti
 
   DEBUG_ONLY(pg_txn_manager_->DEBUG_CheckOptionsForPerform(options));
 
-  VLOG(2) << "Perform options: " << options.ShortDebugString();
+  VLOG(2) << "Perform options: " << options.ShortDebugString()
+           << ", num_ops: " << ops.Size();
   PgsqlOps operations;
   PgObjectIds relations;
   std::move(ops).MoveTo(operations, relations);
@@ -1230,9 +1238,17 @@ Status PgSession::AcquireObjectLock(
   auto fastpath_lock_type = docdb::MakeObjectLockFastpathLockType(TableLockType(mode));
   if (!is_session_lock && fastpath_lock_type &&
       pg_txn_manager_->TryAcquireObjectLock(lock_id, *fastpath_lock_type)) {
+    VLOG(2) << "Acquired object lock via shared memory fast path"
+             << ", db_oid: " << lock_id.db_oid
+             << ", relation_oid: " << lock_id.relation_oid
+             << ", mode: " << static_cast<int>(mode);
     return Status::OK();
   }
-  VLOG(1) << "Lock acquisition via shared memory not available";
+  VLOG(1) << "Lock acquisition via shared memory not available"
+           << ", db_oid: " << lock_id.db_oid
+           << ", relation_oid: " << lock_id.relation_oid
+           << ", mode: " << static_cast<int>(mode)
+           << ", is_session_lock: " << is_session_lock;
   return pg_txn_manager_->AcquireObjectLock(
       VERIFY_RESULT(FlushBufferedOperations(PgFlushDebugContext::AcquireLock(ToString(lock_id)))),
       lock_id, mode, is_session_lock,

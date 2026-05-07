@@ -453,7 +453,8 @@ Status PgTxnManager::CalculateIsolation(
         || yb_read_after_commit_visibility == YB_DEFERRED_READ_AFTER_COMMIT_VISIBILITY)
       && docdb_isolation != IsolationLevel::SERIALIZABLE_ISOLATION;
 
-  VLOG_TXN_STATE(2) << "DocDB isolation level: " << IsolationLevel_Name(docdb_isolation);
+  VLOG_TXN_STATE(2) << "DocDB isolation level: " << IsolationLevel_Name(docdb_isolation)
+                    << ", need_defer_read_point: " << need_defer_read_point_;
 
   if (isolation_level_ != IsolationLevel::NON_TRANSACTIONAL) {
     // Sanity check: query layer should ensure that this does not happen.
@@ -491,6 +492,7 @@ Status PgTxnManager::CalculateIsolation(
 }
 
 Status PgTxnManager::RestartTransaction() {
+  VLOG_TXN_STATE(2) << "Requesting transaction restart";
   need_restart_ = true;
   return Status::OK();
 }
@@ -526,12 +528,15 @@ Status PgTxnManager::ResetTransactionReadPoint(bool is_catalog_snapshot) {
 
 Status PgTxnManager::EnsureReadPoint() {
   DCHECK(read_time_manipulation_ != tserver::ReadTimeManipulation::RESTART);
+  VLOG_WITH_FUNC(3) << "Setting read_time_manipulation to ENSURE_READ_TIME_IS_SET"
+                     << ", previous: " << tserver::ReadTimeManipulation_Name(read_time_manipulation_);
   read_time_manipulation_ = tserver::ReadTimeManipulation::ENSURE_READ_TIME_IS_SET;
   return Status::OK();
 }
 
 /* This is called when a read committed transaction wants to restart its read point */
 Status PgTxnManager::RestartReadPoint() {
+  VLOG_TXN_STATE(2) << "Restarting read point for read committed transaction";
   read_time_manipulation_ = tserver::ReadTimeManipulation::RESTART;
   return Status::OK();
 }
@@ -546,10 +551,12 @@ void PgTxnManager::SetActiveSubTransactionId(SubTransactionId id) {
 }
 
 Status PgTxnManager::CommitPlainTransaction(const std::optional<PgDdlCommitInfo>& ddl_commit_info) {
+  VLOG_TXN_STATE(2) << "CommitPlainTransaction";
   return FinishPlainTransaction(Commit::kTrue, ddl_commit_info);
 }
 
 Status PgTxnManager::AbortPlainTransaction() {
+  VLOG_TXN_STATE(2) << "AbortPlainTransaction";
   return FinishPlainTransaction(Commit::kFalse, std::nullopt /* ddl_commit_info */);
 }
 
@@ -730,7 +737,11 @@ std::string PgTxnManager::TxnStateDebugStr() const {
       txn_in_progress,
       serial_no,
       pg_isolation_level,
-      isolation_level);
+      isolation_level,
+      has_writes,
+      need_restart,
+      need_defer_read_point,
+      using_table_locks);
 }
 
 Status PgTxnManager::SetupPerformOptions(
@@ -832,6 +843,18 @@ Status PgTxnManager::SetupPerformOptions(
   options->set_force_global_transaction(yb_force_global_transaction);
   options->set_force_tablespace_locality(yb_force_tablespace_locality);
   options->set_force_tablespace_locality_oid(yb_force_tablespace_locality_oid);
+
+  VLOG(3) << __func__ << ": final options"
+           << ", txn_serial_no: " << options->txn_serial_no()
+           << ", read_time_serial_no: " << options->read_time_serial_no()
+           << ", isolation: " << IsolationLevel_Name(options->isolation())
+           << ", ddl_mode: " << options->ddl_mode()
+           << ", read_time_manipulation: "
+           << tserver::ReadTimeManipulation_Name(options->read_time_manipulation())
+           << ", has_read_time: " << options->has_read_time()
+           << ", clamp_uncertainty_window: " << options->clamp_uncertainty_window()
+           << ", defer_read_point: " << options->defer_read_point()
+           << ", restart_transaction: " << options->restart_transaction();
   return Status::OK();
 }
 

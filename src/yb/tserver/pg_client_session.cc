@@ -2209,6 +2209,10 @@ class PgClientSession::Impl {
         GetSessionKindBasedOnDDLOptions(is_ddl_mode, ddl_use_regular_transaction_block);
     const auto deadline = context->GetClientDeadline();
     auto& txn = GetSessionData(kind).transaction;
+    VLOG_WITH_PREFIX_AND_FUNC(2)
+        << "ddl: " << is_ddl_mode << ", " << (is_commit ? "commit" : "abort")
+        << ", session_kind: " << ToString(kind)
+        << ", txn: " << (txn ? txn->id().ToString() : "none");
     if (!txn) {
       VLOG_WITH_PREFIX_AND_FUNC(2)
           << "ddl: " << is_ddl_mode << ", " << (is_commit ? "commit" : "abort")
@@ -3426,6 +3430,7 @@ class PgClientSession::Impl {
     auto& session_data = GetSessionData(kSessionKind);
     auto& txn = session_data.transaction;
     if (!txn) {
+      VLOG_WITH_PREFIX(2) << "Creating new PG session-level transaction";
       txn = transaction_provider_.Take<kSessionKind>(deadline);
       txn->SetLogPrefixTag(kTxnLogPrefixTag, id_);
       txn->InitPgSessionRequestVersion();
@@ -3668,10 +3673,6 @@ class PgClientSession::Impl {
     if (global_required) {
       locality = TransactionFullLocality::Global();
     }
-    // Amit: Is it possible that we'd be enabling table locks for one type of session (say plain)
-    // but have it disabled for another type (say kDDl) ? Would that cause a problem?
-    // should only go from off -> on. Not the other way around.
-    // The txn should be marked correctly?
     txn = transaction_provider_.Take<kSessionKind>(locality, deadline);
     txn->SetLogPrefixTag(kTxnLogPrefixTag, id_);
     RETURN_NOT_OK(txn->SetPgTxnStart(
@@ -3781,7 +3782,9 @@ class PgClientSession::Impl {
       const auto old_read_time = session.read_point()->GetReadTime();
       session.RestartNonTxnReadPoint(client::Restart::kTrue);
       const auto new_read_time = session.read_point()->GetReadTime();
-      VLOG_WITH_PREFIX(3) << "Restarted read: " << old_read_time << " => " << new_read_time;
+      VLOG_WITH_PREFIX(2) << "Restarted non-txn read point"
+                           << ": " << old_read_time << " => " << new_read_time
+                           << ", session_kind: " << ToString(kind);
       LOG_IF_WITH_PREFIX(DFATAL, old_read_time == new_read_time)
           << "Read time did not change during restart: " << old_read_time
           << " => " << new_read_time;
@@ -3792,9 +3795,11 @@ class PgClientSession::Impl {
         txn->IsRestartRequired(), IllegalState,
         "Attempted to restart when transaction does not require restart");
     RETURN_NOT_OK(ReleaseObjectLocksIfNecessary(txn, kind, deadline));
+    const auto old_txn_id = txn->id();
     txn = VERIFY_RESULT(txn->CreateRestartedTransaction());
     session.SetTransaction(txn);
-    VLOG_WITH_PREFIX(3) << "Restarted transaction";
+    VLOG_WITH_PREFIX(2) << "Restarted transaction: " << old_txn_id << " => " << txn->id()
+                         << ", session_kind: " << ToString(kind);
     return Status::OK();
   }
 
@@ -3979,7 +3984,7 @@ class PgClientSession::Impl {
           silently_altered_db ? response_cache().Disable(*silently_altered_db)
                               : PgResponseCache::Disabler());
 
-      VLOG_WITH_PREFIX_AND_FUNC(2)
+      VLOG_WITH_PREFIX_AND_FUNC(1)
           << "ddl: " << is_ddl
           << ", session_kind: " << ToString(used_session_kind)
           << ", ddl_use_regular_transaction_block: " << ddl_use_regular_transaction_block
@@ -4014,7 +4019,7 @@ class PgClientSession::Impl {
         pg_node_level_mutation_counter()->IncreaseBatch(table_mutations);
       }
     } else {
-      VLOG_WITH_PREFIX_AND_FUNC(2)
+      VLOG_WITH_PREFIX_AND_FUNC(1)
           << "ddl: " << is_ddl
           << ", session_kind: " << ToString(used_session_kind)
           << ", ddl_use_regular_transaction_block: " << ddl_use_regular_transaction_block
