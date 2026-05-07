@@ -1490,6 +1490,11 @@ class CatalogManager : public CatalogManagerIf, public SnapshotCoordinatorContex
   Status IsObjectPartOfXRepl(
     const IsObjectPartOfXReplRequestPB* req, IsObjectPartOfXReplResponsePB* resp) override;
 
+  // Whether there is a CDC/xCluster stream for a given namespace (database).
+  Status IsNamespacePartOfXRepl(
+    const IsNamespacePartOfXReplRequestPB* req,
+    IsNamespacePartOfXReplResponsePB* resp) override;
+
   // Fetch CDC stream info corresponding to a db stream id
   Status GetCDCDBStreamInfo(
       const GetCDCDBStreamInfoRequestPB* req, GetCDCDBStreamInfoResponsePB* resp) override;

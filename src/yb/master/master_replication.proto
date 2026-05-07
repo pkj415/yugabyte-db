@@ -149,6 +149,15 @@ message IsObjectPartOfXReplResponsePB {
   required bool is_object_part_of_xrepl = 2;
 }
 
+message IsNamespacePartOfXReplRequestPB {
+  required string namespace_id = 1;
+}
+
+message IsNamespacePartOfXReplResponsePB {
+  optional MasterErrorPB error = 1;
+  required bool is_namespace_part_of_xrepl = 2;
+}
+
 message GetCDCStreamRequestPB {
   optional bytes stream_id = 1;
   optional string cdcsdk_ysql_replication_slot_name = 2;
@@ -909,6 +918,8 @@ service MasterReplication {
   rpc ListCDCStreams(ListCDCStreamsRequestPB) returns (ListCDCStreamsResponsePB);
   rpc IsObjectPartOfXRepl(IsObjectPartOfXReplRequestPB)
       returns (IsObjectPartOfXReplResponsePB);
+  rpc IsNamespacePartOfXRepl(IsNamespacePartOfXReplRequestPB)
+      returns (IsNamespacePartOfXReplResponsePB);
   rpc GetCDCStream(GetCDCStreamRequestPB) returns (GetCDCStreamResponsePB);
   rpc GetCDCDBStreamInfo(GetCDCDBStreamInfoRequestPB) returns (GetCDCDBStreamInfoResponsePB);
   rpc UpdateCDCStream (UpdateCDCStreamRequestPB) returns (UpdateCDCStreamResponsePB);

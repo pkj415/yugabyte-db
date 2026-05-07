@@ -2522,6 +2522,19 @@ class PgClientServiceImpl::Impl : public SessionProvider {
     return Status::OK();
   }
 
+  Status IsNamespacePartOfXRepl(
+    const PgIsNamespacePartOfXReplRequestPB& req, PgIsNamespacePartOfXReplResponsePB* resp,
+    rpc::RpcContext* context) {
+    auto namespace_id = GetPgsqlNamespaceId(req.database_oid());
+    auto res = client().IsNamespacePartOfXRepl(namespace_id);
+    if (!res.ok()) {
+      StatusToPB(res.status(), resp->mutable_status());
+    } else {
+      resp->set_is_namespace_part_of_xrepl(*res);
+    }
+    return Status::OK();
+  }
+
   void Perform(PgPerformRequestMsg* req, PgPerformResponseMsg* resp, rpc::RpcContext* context) {
     boost::container::small_vector<TableId, 4> table_ids;
     PreparePgTablesQuery(*req, table_ids);

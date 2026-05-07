@@ -252,6 +252,9 @@ class CatalogManagerIf : public tserver::TabletPeerLookupIf {
   virtual Status IsObjectPartOfXRepl(
       const IsObjectPartOfXReplRequestPB* req, IsObjectPartOfXReplResponsePB* resp) = 0;
 
+  virtual Status IsNamespacePartOfXRepl(
+      const IsNamespacePartOfXReplRequestPB* req, IsNamespacePartOfXReplResponsePB* resp) = 0;
+
   virtual Status GetCDCDBStreamInfo(
     const GetCDCDBStreamInfoRequestPB* req, GetCDCDBStreamInfoResponsePB* resp) = 0;
 

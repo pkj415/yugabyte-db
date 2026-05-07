@@ -39,6 +39,7 @@ class MasterReplicationServiceImpl : public MasterServiceBase, public MasterRepl
     (UpdateConsumerOnProducerMetadata)
     (ListCDCStreams)
     (IsObjectPartOfXRepl)
+    (IsNamespacePartOfXRepl)
     (UpdateCDCStream)
     (GetCDCDBStreamInfo)
     (IsBootstrapRequired)

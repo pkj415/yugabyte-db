@@ -2093,6 +2093,7 @@ YBStartTransaction(TransactionState s)
 
 	if (IsYugaByteEnabled())
 	{
+		YbEnableSkipIntentsForNewTransaction();
 		YBInitializeTransaction();
 	}
 }
@@ -5104,7 +5105,7 @@ YbBeginInternalSubTransactionForReadCommittedStatement()
 }
 
 bool
-YBTransactionContainsNonReadCommittedSavepoint(void)
+YBTransactionContainsNonReadCommittedNamedSavepoint(void)
 {
 	if (!IsTransactionBlock())
 		return false;
@@ -5118,6 +5119,33 @@ YBTransactionContainsNonReadCommittedSavepoint(void)
 	{
 		if (s->name != NULL &&
 			strcmp(s->name, YB_READ_COMMITTED_INTERNAL_SUB_TXN_NAME) != 0)
+			return true;
+
+		s = s->parent;
+	}
+
+	return false;
+}
+
+bool
+YBTransactionContainsNonReadCommittedSavepoint(void)
+{
+	if (!IsTransactionBlock())
+		return false;
+
+	if (!IsSubTransaction())
+		return false;
+
+	TransactionState s = CurrentTransactionState;
+
+	while (s != NULL)
+	{
+		if (s->name == NULL)
+		{
+			if (s->parent)
+				return true;
+		}
+		else if (strcmp(s->name, YB_READ_COMMITTED_INTERNAL_SUB_TXN_NAME) != 0)
 			return true;
 
 		s = s->parent;

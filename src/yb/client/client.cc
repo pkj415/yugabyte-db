@@ -188,6 +188,8 @@ using yb::master::IsLoadBalancedRequestPB;
 using yb::master::IsLoadBalancedResponsePB;
 using yb::master::IsLoadBalancerIdleRequestPB;
 using yb::master::IsLoadBalancerIdleResponsePB;
+using yb::master::IsNamespacePartOfXReplRequestPB;
+using yb::master::IsNamespacePartOfXReplResponsePB;
 using yb::master::IsObjectPartOfXReplRequestPB;
 using yb::master::IsObjectPartOfXReplResponsePB;
 using yb::master::ListCDCStreamsRequestPB;
@@ -1933,6 +1935,15 @@ Result<bool> YBClient::IsObjectPartOfXRepl(const TableId& table_id) {
   CALL_SYNC_LEADER_MASTER_RPC_EX(Replication, req, resp, IsObjectPartOfXRepl);
   return resp.has_error() ? StatusFromPB(resp.error().status())
                           : Result<bool>(resp.is_object_part_of_xrepl());
+}
+
+Result<bool> YBClient::IsNamespacePartOfXRepl(const NamespaceId& namespace_id) {
+  IsNamespacePartOfXReplRequestPB req;
+  IsNamespacePartOfXReplResponsePB resp;
+  req.set_namespace_id(namespace_id);
+  CALL_SYNC_LEADER_MASTER_RPC_EX(Replication, req, resp, IsNamespacePartOfXRepl);
+  return resp.has_error() ? StatusFromPB(resp.error().status())
+                          : Result<bool>(resp.is_namespace_part_of_xrepl());
 }
 
 Result<bool> YBClient::IsBootstrapRequired(

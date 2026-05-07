@@ -552,6 +552,7 @@ extern void YbBeginInternalSubTransactionForReadCommittedStatement();
  * Determine if the transaction block contains a savepoint other than the
  * internal ones created for READ COMMITTED isolation level.
  */
+extern bool YBTransactionContainsNonReadCommittedNamedSavepoint(void);
 extern bool YBTransactionContainsNonReadCommittedSavepoint(void);
 extern void YBStartTransactionCommandInternal(bool yb_skip_read_committed_internal_savepoint);
 extern void YbCommitTransactionCommandIntermediate(void);

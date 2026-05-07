@@ -80,6 +80,14 @@ DEFINE_RUNTIME_PG_FLAG(int32, yb_max_num_invalidation_messages, 4096,
 DEFINE_RUNTIME_uint32(ysql_max_invalidation_message_queue_size, 1024,
                       "Maximum number of invalidation messages we keep for a given database.");
 
+DEFINE_RUNTIME_PG_FLAG(bool, yb_enable_new_relation_fastpath_write, true,
+                       "Enables fastpath writes for relations created in the current transaction "
+                       "(skip intents DB when safe).");
+
+DEFINE_RUNTIME_PG_PREVIEW_FLAG(bool, yb_enable_new_relation_fastpath_write_in_txn_blocks, false,
+                               "Allows fastpath writes inside explicit transaction blocks. "
+                               "Requires yb_enable_new_relation_fastpath_write.");
+
 namespace yb::pggate {
 namespace {
 constexpr size_t kTablespaceCacheCapacity = 1024;
@@ -371,7 +379,15 @@ class PgSession::RunHelper {
             << ", table name: " << table.table_name().table_name()
             << ", table relfilenode id: " << table.relfilenode_id();
 
+    bool skip_intents = op->skip_intents();
     auto& buffer = pg_session_.buffer_;
+    if (!buffer.IsEmpty() && skip_intents != pg_session_.last_op_skipped_intents_) {
+        VLOG(1) << "Flushing buffer due to skip_intents mode switch. "
+                << "new skip_intents mode: " << skip_intents;
+        RETURN_NOT_OK(pg_session_.FlushBufferedEntities(
+            PgFlushDebugContext::SwitchSkipIntentsMode()));
+    }
+    pg_session_.last_op_skipped_intents_ = skip_intents;
 
     // Try buffering this operation if it is a write operation, buffering is enabled and no
     // operations have been already applied to current session (yb session does not exist).

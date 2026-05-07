@@ -88,7 +88,11 @@ class PgDdlTransactionTest : public LibPqTestBase {
     opts->extra_tserver_flags.push_back("--ysql_yb_ddl_transaction_block_enabled=true");
     opts->extra_tserver_flags.push_back("--yb_enable_read_committed_isolation=true");
     opts->extra_tserver_flags.push_back(
-        "--allowed_preview_flags_csv=ysql_yb_ddl_transaction_block_enabled");
+        "--allowed_preview_flags_csv=ysql_yb_ddl_transaction_block_enabled,"
+        "ysql_yb_enable_new_relation_fastpath_write_in_txn_blocks");
+    opts->extra_tserver_flags.push_back(
+        Format("--ysql_yb_enable_new_relation_fastpath_write_in_txn_blocks=$0",
+               (RandomUniformBool() ? "true" : "false")));
   }
 
   // ysql_yb_disable_ddl_transaction_block_for_read_committed is a non-runtime flag for now, so we
@@ -305,6 +309,37 @@ TEST_F(PgDdlTransactionMiniClusterTest, TestWaitForSchemaVersionAfterRollback) {
   }
 
   SyncPoint::GetInstance()->DisableProcessing();
+}
+
+TEST_F(PgDdlTransactionTest, TestNoSkipIntentsWriteOnSavepoint) {
+  auto client = ASSERT_RESULT(cluster_->CreateClient());
+  auto conn = ASSERT_RESULT(Connect());
+
+  const int nrows = 100;
+  ASSERT_OK(conn.Execute("BEGIN"));
+  ASSERT_OK(conn.Execute("CREATE TABLE users (first_name TEXT, last_name TEXT)"));
+  ASSERT_OK(conn.Execute("CREATE TABLE users2 (first_name TEXT, last_name TEXT)"));
+  ASSERT_OK(conn.Execute("CREATE TABLE users3 (first_name TEXT, last_name TEXT)"));
+  ASSERT_OK(conn.ExecuteFormat(
+      "INSERT INTO users SELECT md5(random()::text), md5(random()::text) FROM "
+      "(SELECT * FROM generate_series(1,$0) AS id) AS id", nrows));
+  ASSERT_OK(conn.Execute("SAVEPOINT sp1; -- currentSubTransactionId = 2"));
+  ASSERT_OK(conn.ExecuteFormat(
+      "INSERT INTO users2 SELECT md5(random()::text), md5(random()::text) FROM "
+      "(SELECT * FROM generate_series(1,$0) AS id) AS id", nrows));
+  ASSERT_OK(conn.Execute("SAVEPOINT sp2; -- currentSubTransactionId = 3"));
+  ASSERT_OK(conn.ExecuteFormat(
+      "INSERT INTO users3 SELECT md5(random()::text), md5(random()::text) FROM "
+      "(SELECT * FROM generate_series(1,$0) AS id) AS id", nrows));
+  ASSERT_OK(conn.Execute("ROLLBACK TO SAVEPOINT sp2; -- currentSubTransactionId = 2"));
+  ASSERT_OK(conn.Execute("COMMIT"));
+
+  auto count = ASSERT_RESULT(conn.FetchRow<PGUint64>(("SELECT COUNT(*) FROM users")));
+  ASSERT_EQ(count, nrows);
+  count = ASSERT_RESULT(conn.FetchRow<PGUint64>(("SELECT COUNT(*) FROM users2")));
+  ASSERT_EQ(count, nrows);
+  count = ASSERT_RESULT(conn.FetchRow<PGUint64>(("SELECT COUNT(*) FROM users3")));
+  ASSERT_EQ(count, 0);
 }
 
 class PgDdlSavepointMiniClusterTest : public PgMiniTestBase,

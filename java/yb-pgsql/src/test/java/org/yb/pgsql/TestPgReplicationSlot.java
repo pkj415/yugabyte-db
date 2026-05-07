@@ -84,6 +84,7 @@ public class TestPgReplicationSlot extends BasePgSQLTest {
     flagMap.put("cdc_send_null_before_image_if_not_exists", "true");
     flagMap.put("TEST_dcheck_for_missing_schema_packing", "false");
     flagMap.put("ysql_cdc_active_replication_slot_window_ms", "0");
+    flagMap.put("ysql_cdcsdk_enable_old_namespace_streams", "false");
     return flagMap;
   }
 

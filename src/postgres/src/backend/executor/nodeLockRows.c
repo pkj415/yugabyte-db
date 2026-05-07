@@ -200,8 +200,11 @@ lnext:
 			   node->yb_are_row_marks_for_yb_rels);
 		if (node->yb_are_row_marks_for_yb_rels)
 		{
-			test = YBCLockTuple(erm->relation, datum, erm->markType,
-								erm->waitPolicy, estate);
+			if (!YbCanSkipIntentsWrite(erm->relation))
+				test = YBCLockTuple(erm->relation, datum, erm->markType,
+									erm->waitPolicy, estate);
+			else
+				test = TM_Ok;
 		}
 		else
 		{

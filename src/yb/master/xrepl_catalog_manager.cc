@@ -3735,6 +3735,22 @@ Status CatalogManager::IsObjectPartOfXRepl(
   return Status::OK();
 }
 
+Status CatalogManager::IsNamespacePartOfXRepl(
+    const IsNamespacePartOfXReplRequestPB* req, IsNamespacePartOfXReplResponsePB* resp) {
+  SharedLock lock(mutex_);
+  for (const auto& [_, stream] : cdc_stream_map_) {
+    auto ltm = stream->LockForRead();
+    if (!ltm->is_deleting() &&
+        !ltm->namespace_id().empty() &&
+        ltm->namespace_id() == req->namespace_id()) {
+      resp->set_is_namespace_part_of_xrepl(true);
+      return Status::OK();
+    }
+  }
+  resp->set_is_namespace_part_of_xrepl(false);
+  return Status::OK();
+}
+
 Status CatalogManager::UpdateCDCStreams(
     const std::vector<xrepl::StreamId>& stream_ids,
     const std::vector<yb::master::SysCDCStreamEntryPB>& update_entries) {

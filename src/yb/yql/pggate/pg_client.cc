@@ -1444,6 +1444,18 @@ class PgClient::Impl : public BigDataFetcher {
     return resp.is_object_part_of_xrepl();
   }
 
+  Result<bool> IsNamespacePartOfXRepl(uint32_t database_oid) {
+    tserver::PgIsNamespacePartOfXReplRequestPB req;
+    tserver::PgIsNamespacePartOfXReplResponsePB resp;
+    req.set_database_oid(database_oid);
+    RETURN_NOT_OK(DoSyncRPC(&PgClientServiceProxy::IsNamespacePartOfXRepl,
+        req, resp, PggateRPC::kIsNamespacePartOfXRepl));
+    if (resp.has_status()) {
+      return StatusFromPB(resp.status());
+    }
+    return resp.is_namespace_part_of_xrepl();
+  }
+
   Status EnumerateActiveTransactions(
       const ActiveTransactionCallback& callback, bool for_current_session_only) {
     tserver::PgGetActiveTransactionListRequestPB req;
@@ -2271,6 +2283,10 @@ Result<bool> PgClient::CheckIfPitrActive() {
 
 Result<bool> PgClient::IsObjectPartOfXRepl(const PgObjectId& table_id) {
   return impl_->IsObjectPartOfXRepl(table_id);
+}
+
+Result<bool> PgClient::IsNamespacePartOfXRepl(uint32_t database_oid) {
+  return impl_->IsNamespacePartOfXRepl(database_oid);
 }
 
 Result<TableKeyRanges> PgClient::GetTableKeyRanges(
