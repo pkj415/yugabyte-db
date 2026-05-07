@@ -102,6 +102,7 @@ Status MakeConflictStatus(const TransactionId& our_id, const TransactionId& othe
                           const std::string& reason,
                           const std::shared_ptr<tablet::TabletMetricsHolder>& tablet_metrics) {
   tablet_metrics->Increment(tablet::TabletCounters::kTransactionConflicts);
+  VLOG(1) << "Transaction conflict: " << our_id << " vs " << other_id << ", reason: " << reason;
   return (STATUS(TryAgain, Format("$0 conflicts with $1: $2", our_id, reason, other_id),
                  Slice(), TransactionError(TransactionErrorCode::kConflict)));
 }
@@ -404,10 +405,12 @@ class ConflictResolver : public std::enable_shared_from_this<ConflictResolver> {
     if (conflicts_.empty()) {
       VTRACE(1, LogPrefix());
       TRACE("No conflicts.");
+      VLOG_WITH_PREFIX(2) << "No conflicts found, resolution_ht: " << context_->GetResolutionHt();
       InvokeCallback(context_->GetResolutionHt());
       return;
     }
 
+    VLOG_WITH_PREFIX(2) << "Found " << conflicts_.size() << " conflicting transactions";
     TRACE("Has conflicts.");
     conflict_data_ = std::make_shared<ConflictDataManager>(conflicts_.size());
     for (const auto& [id, conflict_info] : conflicts_) {
@@ -598,6 +601,9 @@ class FailOnConflictResolver : public ConflictResolver {
 
   Status OnConflictingTransactionsFound() override {
     DCHECK_GT(conflict_data_->NumActiveTransactions(), 0);
+    VLOG_WITH_PREFIX(2) << "Fail-on-conflict: " << conflict_data_->NumActiveTransactions()
+                         << " active conflicting transactions"
+                         << ", policy: " << context_->GetConflictManagementPolicy();
     if (context_->GetConflictManagementPolicy() == SKIP_ON_CONFLICT) {
       return STATUS(InternalError, "Skip locking since entity is already locked",
                     TransactionError(TransactionErrorCode::kSkipLocking));
@@ -762,7 +768,10 @@ class WaitOnConflictResolver : public ConflictResolver {
   void WaitingDone(const Status& status, HybridTime resume_ht) {
     ADOPT_TRACE(trace_.get());
     TRACE_FUNC();
-    VLOG_WITH_FUNC(4) << context_->transaction_id() << " status: " << status;
+    VLOG_WITH_FUNC(2) << context_->transaction_id()
+                       << " status: " << status
+                       << ", resume_ht: " << resume_ht
+                       << ", wait_for_iters: " << wait_for_iters_;
     wait_for_iters_++;
 
     if (!status.ok()) {
@@ -1352,6 +1361,11 @@ class TransactionConflictResolverContext : public ConflictResolverContextBase {
       // In all other cases we have a concrete read time and should conflict with transactions
       // that were committed after this point.
       if (has_non_lock_conflict && (commit_time > read_time_ || commit_time == HybridTime::kMax)) {
+        VLOG_WITH_PREFIX(2)
+            << "Conflict with committed txn " << transaction_data.id
+            << ", commit_time: " << commit_time << ", read_time: " << read_time_
+            << ", subtxn_id: " << subtxn_and_data.first
+            << ", conflict_mgmt_policy: " << GetConflictManagementPolicy();
         if (GetConflictManagementPolicy() == SKIP_ON_CONFLICT) {
           return STATUS(InternalError, "Skip locking since entity was modified by a recent commit",
                         TransactionError(TransactionErrorCode::kSkipLocking));
