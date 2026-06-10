@@ -541,4 +541,82 @@ TEST_F(PgReadAfterCommitVisibilityTest, DeferredModeHiddenDml) {
   );
 }
 
+// Test fixture for autonomous DDL mode where DDLs always run as separate
+// transactions, even inside a transaction block.
+class PgReadAfterCommitVisibilityAutonomousDdlTest
+    : public PgReadAfterCommitVisibilityTest {
+ public:
+  void SetUp() override {
+    server::SkewedClock::Register();
+    ANNOTATE_UNPROTECTED_WRITE(FLAGS_yb_enable_read_committed_isolation) = true;
+    ANNOTATE_UNPROTECTED_WRITE(FLAGS_time_source) = server::SkewedClock::kName;
+    ANNOTATE_UNPROTECTED_WRITE(FLAGS_replication_factor) = 1;
+    ANNOTATE_UNPROTECTED_WRITE(FLAGS_ysql_yb_ddl_transaction_block_enabled) = false;
+    ANNOTATE_UNPROTECTED_WRITE(FLAGS_enable_object_locking_for_table_locks) = false;
+    ANNOTATE_UNPROTECTED_WRITE(FLAGS_ysql_enable_concurrent_ddl) = false;
+    PgMiniTestBase::SetUp();
+    SpawnSupervisors();
+  }
+};
+
+// Verify that REFRESH MATERIALIZED VIEW sees committed data when using deferred
+// read-after-commit visibility in autonomous DDL mode.
+TEST_F(PgReadAfterCommitVisibilityAutonomousDdlTest, DeferredModeDdl) {
+  auto proxyConn = ASSERT_RESULT(ConnectToProxy());
+  auto hostConn = ASSERT_RESULT(ConnectToDataHost());
+
+  ASSERT_OK(hostConn.Execute(
+    "CREATE TABLE kv (k INT, v INT, PRIMARY KEY(k HASH)) SPLIT INTO 1 TABLETS"));
+  ASSERT_OK(hostConn.Execute("CREATE MATERIALIZED VIEW kv_mv AS SELECT k, v FROM kv"));
+  ASSERT_OK(proxyConn.Execute("REFRESH MATERIALIZED VIEW kv_mv"));
+  auto count = ASSERT_RESULT(proxyConn.FetchRow<int64_t>("SELECT COUNT(1) FROM kv_mv"));
+  ASSERT_EQ(count, 0);
+
+  auto skew = 200ms;
+  auto changers = JumpClockDataNodes(skew);
+
+  ASSERT_OK(hostConn.Execute("INSERT INTO kv(k, v) VALUES (1, 1)"));
+
+  // Without deferred mode, the DDL's read point is from the proxy's (behind)
+  // clock. The INSERT committed on the data node falls in the uncertainty
+  // window, triggering a read restart that is not retried for DDLs.
+  auto status = proxyConn.Execute("REFRESH MATERIALIZED VIEW kv_mv");
+  ASSERT_NOK(status);
+  LOG(INFO) << "Expected read restart error for DDL without deferred mode: " << status;
+  ASSERT_EQ(PgsqlError(status), YBPgErrorCode::YB_PG_T_R_SERIALIZATION_FAILURE) << status;
+
+  // With deferred mode the read point is set to global_limit, which is above
+  // the committed timestamp, so the DDL sees all committed data.
+  ASSERT_OK(hostConn.Execute("INSERT INTO kv(k, v) VALUES (2, 2)"));
+  ASSERT_OK(proxyConn.Execute(
+    "SET yb_read_after_commit_visibility = 'deferred'"));
+  ASSERT_OK(proxyConn.Execute("REFRESH MATERIALIZED VIEW kv_mv"));
+  count = ASSERT_RESULT(proxyConn.FetchRow<int64_t>("SELECT COUNT(1) FROM kv_mv"));
+  ASSERT_EQ(count, 2);
+
+  // Verify the same for an autonomous DDL in a transaction block.
+  ASSERT_OK(hostConn.Execute("INSERT INTO kv(k, v) VALUES (3, 3)"));
+
+  // Without deferred mode, REFRESH hits a read restart inside a txn block too.
+  ASSERT_OK(proxyConn.Execute("RESET yb_read_after_commit_visibility"));
+  ASSERT_OK(proxyConn.StartTransaction(IsolationLevel::SNAPSHOT_ISOLATION));
+  status = proxyConn.Execute("REFRESH MATERIALIZED VIEW kv_mv");
+  ASSERT_NOK(status);
+  LOG(INFO) << "Expected read restart error for DDL in txn block without deferred mode: " << status;
+  ASSERT_EQ(PgsqlError(status), YBPgErrorCode::YB_PG_T_R_SERIALIZATION_FAILURE) << status;
+  ASSERT_OK(proxyConn.RollbackTransaction());
+
+  // With deferred mode, both the DML and DDL see the committed data.
+  ASSERT_OK(hostConn.Execute("INSERT INTO kv(k, v) VALUES (4, 4)"));
+  ASSERT_OK(proxyConn.Execute(
+    "SET yb_read_after_commit_visibility = 'deferred'"));
+  ASSERT_OK(proxyConn.StartTransaction(IsolationLevel::SNAPSHOT_ISOLATION));
+  auto rows = ASSERT_RESULT(proxyConn.FetchRows<int32_t>("SELECT k FROM kv"));
+  ASSERT_EQ(rows.size(), 4);
+  ASSERT_OK(proxyConn.Execute("REFRESH MATERIALIZED VIEW kv_mv")); // autnomous transaction
+  ASSERT_OK(proxyConn.CommitTransaction());
+  count = ASSERT_RESULT(proxyConn.FetchRow<int64_t>("SELECT COUNT(1) FROM kv_mv"));
+  ASSERT_EQ(count, 4);
+}
+
 } // namespace yb::pgwrapper

@@ -3657,7 +3657,7 @@ class PgClientSession::Impl {
       RETURN_NOT_OK(GetDdlTransactionMetadata(
           true /* use_transaction */, false /* use_regular_transaction_block */, deadline,
           IsTxnUsingTableLocks(options.is_using_table_locks()), arena, options.priority(),
-          options.pg_txn_start_us()));
+          options.pg_txn_start_us(), options.read_time_options().defer_read_point()));
     } else {
       DCHECK(kind == PgClientSessionKind::kPlain);
       auto& session = EnsureSession(kind, deadline, arena);
@@ -3810,8 +3810,7 @@ class PgClientSession::Impl {
     RETURN_NOT_OK(
         UpdateReadPointForXClusterConsistentReads(options, deadline, session.read_point()));
 
-    if (!options.ddl_mode() && !options.use_legacy_catalog_session() &&
-        read_time_options.defer_read_point()) {
+    if (!options.use_legacy_catalog_session() && read_time_options.defer_read_point()) {
       // For DMLs, only fast path writes cannot be deferred.
       RETURN_NOT_OK(session.read_point()->TrySetDeferredCurrentReadTime());
       VLOG_WITH_PREFIX(3) << "Set current read time for deferred mode "
@@ -3985,7 +3984,7 @@ class PgClientSession::Impl {
       bool use_transaction, bool use_regular_transaction_block, CoarseTimePoint deadline,
       IsTxnUsingTableLocks is_txn_using_table_locks, const ThreadSafeArenaPtr& arena = nullptr,
       uint64_t priority = kHighPriTxnUpperBound, uint64_t pg_txn_start_us = 0,
-      bool txn_using_table_locks = false) {
+      bool defer_read_point = false) {
     if (!use_transaction) {
       return nullptr;
     }
@@ -4023,7 +4022,11 @@ class PgClientSession::Impl {
       ddl_txn_metadata_ = VERIFY_RESULT(Copy(txn->GetMetadata(deadline).get()));
       EnsureSession(kSessionKind, deadline, arena)->SetTransaction(txn);
       auto& read_point = txn->read_point();
-      read_point.SetCurrentReadTime(ClampUncertaintyWindow::kFalse);
+      if (defer_read_point) {
+        RETURN_NOT_OK(read_point.TrySetDeferredCurrentReadTime());
+      } else {
+        read_point.SetCurrentReadTime(ClampUncertaintyWindow::kFalse);
+      }
       VLOG(1) << "For autonomous DDL txn, setting current ht as read point "
           << read_point.GetReadTime();
     }

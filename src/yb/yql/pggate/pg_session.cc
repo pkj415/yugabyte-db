@@ -862,6 +862,7 @@ Result<FlushFuture> PgSession::FlushOperations(
 NonTransactionalWrites PgSession::OpsHaveNonTransactionalWrites(const PgsqlOps& operations) const {
   return NonTransactionalWrites(
       pg_txn_manager_->GetIsolationLevel() == IsolationLevel::NON_TRANSACTIONAL &&
+      !pg_txn_manager_->IsDdlMode() &&
       std::ranges::any_of(operations, [](const auto& op) { return !IsReadOnly(*op); }));
 }
 
