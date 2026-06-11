@@ -35,6 +35,8 @@ public class TestPgRegressIsolationObjectLocking extends BasePgRegressTest {
       + "ysql_enable_concurrent_ddl");
     flagMap.put("ysql_suppress_unsafe_alter_notice", "true");
     flagMap.put("ysql_beta_features", "true");
+    flagMap.put("vmodule", "pg_client_session=5,batcher=5");
+    appendToYsqlPgConf(flagMap, "log_statement=all,yb_debug_log_docdb_requests=true");
     return flagMap;
   }
 
