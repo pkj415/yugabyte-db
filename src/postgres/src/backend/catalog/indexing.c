@@ -528,11 +528,14 @@ YBCatalogTupleUpdate(Relation heapRel, HeapTuple tup,
 	HeapTuple	oldtup = NULL;
 	bool		has_indices = YBRelHasSecondaryIndices(heapRel);
 
-	Assert(HEAPTUPLE_YBCTID(tup));
+	if (!HEAPTUPLE_YBCTID(tup))
+		elog(ERROR, "cannot update a catalog tuple without a valid ybctid");
 
 	if (has_indices)
 	{
-		YbFetchHeapTuple(heapRel, HEAPTUPLE_YBCTID(tup), &oldtup);
+		if (!YbFetchHeapTuple(heapRel, HEAPTUPLE_YBCTID(tup), &oldtup))
+			elog(ERROR, "could not fetch old tuple from \"%s\" for index update",
+				 RelationGetRelationName(heapRel));
 		CatalogIndexDelete(indstate, oldtup);
 	}
 
