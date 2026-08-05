@@ -3503,13 +3503,6 @@ class PgClientSession::Impl {
             read_time_serial_no_, txn_str);
       }
     }
-
-    if (const auto* read_point = setup_session_result.is_plain ? session->read_point() : nullptr;
-        read_point && read_point->GetReadTime()) {
-      VLOG_WITH_PREFIX(3) << "Saving read time that is already picked";
-      read_point_history_.Save(*read_point, read_time_serial_no_);
-    }
-
     session->FlushAsync([this, data, trace, trace_created_locally,
                          start_time](client::FlushStatus* flush_status) {
       ADOPT_TRACE(trace.get());
@@ -3661,10 +3654,24 @@ class PgClientSession::Impl {
     } else {
       DCHECK(kind == PgClientSessionKind::kPlain);
       auto& session = EnsureSession(kind, deadline, arena);
+      // The previous Perform RPC could have picked a read time either:
+      //
+      // 1. Asynchronously in batcher.cc/ transaction.cc due to a fan-out to multiple remote
+      // tservers (i.e., after the LookupTabletFor rpcs). Save that read time against the
+      // previous read_time_serial_no.
+      //
+      // 2. Or on a remote tserver and received the used_read_time back in the response.
+      auto& read_point = *session->read_point();
+      if (read_point.GetReadTime()) {
+        VLOG_WITH_PREFIX(3) << "Saving previous read time "
+            << AsString(read_point.GetReadTime()) << " to previous read time serial no: "
+            << read_time_serial_no_;
+        read_point_history_.Save(read_point, read_time_serial_no_);
+      }
+
       RETURN_NOT_OK(CheckPlainSessionPendingUsedReadTime(options));
       read_point_history_.Cleanup(options.read_time_options().read_time_serial_no_history_min());
       if (read_time_serial_no != read_time_serial_no_) {
-        auto& read_point = *session->read_point();
         if (read_point_history_.Restore(&read_point, read_time_serial_no)) {
           read_time_serial_no_ = read_time_serial_no;
         }
@@ -4098,8 +4105,10 @@ class PgClientSession::Impl {
       return Status::OK();
     }
     auto& session_data = GetSessionData(PgClientSessionKind::kPlain);
+    auto& session = *session_data.session;
+    const auto& read_point = *session.read_point();
     TabletReadTime read_time_data;
-    {
+    if (!read_point.GetReadTime()) {
       auto& used_read_time = plain_session_used_read_time_.value;
       std::lock_guard guard(used_read_time.lock);
       if (!used_read_time.data) {
@@ -4128,17 +4137,10 @@ class PgClientSession::Impl {
     // At this point the read_time_data.value could be empty in 2 cases:
     // - session already has a read time (i.e. was selected prior to sending of the request)
     // - request has finished with error
-    auto& session = *session_data.session;
     if (read_time_data.value) {
       VLOG_WITH_PREFIX(3) << "Applying non empty used read time: " << read_time_data.value
           << " to read time serial no: " << read_time_serial_no_;
       session.SetReadPoint(read_time_data.value, read_time_data.tablet_id);
-    }
-
-    // Update history because a read point could have been chosen (due to multiple reasons:
-    // a used read time was received from DocDB or a read time was chosen while sending previous
-    // request).
-    if (const auto& read_point = *session.read_point(); read_point.GetReadTime()) {
       read_point_history_.Save(read_point, read_time_serial_no_);
     }
     return Status::OK();
