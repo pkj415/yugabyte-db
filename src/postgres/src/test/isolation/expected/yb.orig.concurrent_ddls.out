@@ -2,8 +2,6 @@ unused step name: s1_begin_rc
 unused step name: s1_begin_sr
 unused step name: s2_begin_rc
 unused step name: s2_begin_sr
-unused step name: s2_drop_table_test
-unused step name: s2_drop_table_test_if_exists
 Parsed test spec with 2 sessions
 
 starting permutation: s1_begin_rr s2_begin_rr s1_drop_table_test s2_drop_table_test2 s1_commit s2_commit
@@ -74,3 +72,23 @@ v
 b      
 (3 rows)
 
+
+starting permutation: s1_begin_rr s2_begin_rr s1_drop_table_test s2_drop_table_test s1_commit s2_commit
+step s1_begin_rr: BEGIN ISOLATION LEVEL REPEATABLE READ;
+step s2_begin_rr: BEGIN ISOLATION LEVEL REPEATABLE READ;
+step s1_drop_table_test: DROP TABLE test;
+step s2_drop_table_test: DROP TABLE test; <waiting ...>
+step s1_commit: COMMIT;
+step s2_drop_table_test: <... completed>
+ERROR:  table "test" does not exist
+step s2_commit: COMMIT;
+
+starting permutation: s1_begin_rr s2_begin_rr s1_drop_table_test s2_drop_table_test_if_exists s1_commit s2_commit
+step s1_begin_rr: BEGIN ISOLATION LEVEL REPEATABLE READ;
+step s2_begin_rr: BEGIN ISOLATION LEVEL REPEATABLE READ;
+step s1_drop_table_test: DROP TABLE test;
+step s2_drop_table_test_if_exists: DROP TABLE IF EXISTS test; <waiting ...>
+step s1_commit: COMMIT;
+s2: NOTICE:  table "test" does not exist, skipping
+step s2_drop_table_test_if_exists: <... completed>
+step s2_commit: COMMIT;

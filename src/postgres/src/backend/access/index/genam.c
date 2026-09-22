@@ -42,6 +42,7 @@
 /* YB includes */
 #include "access/yb_special_scans.h"
 #include "executor/ybModifyTable.h"
+#include "ybctid.h"
 #include <pg_yb_utils.h>
 
 
@@ -604,11 +605,42 @@ bool
 systable_recheck_tuple(SysScanDesc sysscan, HeapTuple tup)
 {
 	/*
-	 * If YugaByte is enabled, systable_recheck_tuple doesn't work
-	 * since the function uses the buffer to determine the tuple's visibility.
+	 * YB: The upstream code below decides visibility from the xmin/xmax in the
+	 * heap buffer that the scan slot points into.  YB tuples are palloc'd
+	 * copies with no buffer behind them, so instead re-fetch the row by its
+	 * ybctid and report whether it still exists.  Callers such as
+	 * findDependentObjects() rely on this to notice that a concurrent DDL
+	 * deleted the object while we waited for its lock, instead of proceeding
+	 * against the deleted row (e.g. "could not find tuple for rule").
+	 *
+	 * Upstream takes a fresh snapshot via GetCatalogSnapshot() for the
+	 * recheck.  There is no equivalent call here because every catalog read
+	 * in YB is bound to the current catalog snapshot by pggate (see
+	 * PgSession::UpdateReadPointForCatalogOps), which creates a new snapshot
+	 * if the previous one was invalidated.  Acquiring the lock we waited on
+	 * ran AcceptInvalidationMessages(), which applied the committed DDL's
+	 * invalidation messages and dropped the old snapshot, so the fetch reads
+	 * at a read time that is at or after that commit.  This must be a scan
+	 * rather than a syscache lookup: the catalogs that need the recheck, e.g.
+	 * pg_depend, have no syscache (see RelationInvalidatesSnapshotsOnly()).
+	 *
+	 * The legacy mode has no object locks, so AcquireDeletionLock() never
+	 * waits and the tuple cannot have gone away.  Keep returning true there.
 	 */
 	if (IsYugaByteEnabled())
-		return true;
+	{
+		HeapTuple	freshtup;
+		bool		found;
+
+		if (YBCIsLegacyModeForCatalogOps())
+			return true;
+
+		found = YbFetchHeapTuple(sysscan->heap_rel, HEAPTUPLE_YBCTID(tup),
+								 &freshtup);
+		if (found)
+			heap_freetuple(freshtup);
+		return found;
+	}
 
 	Snapshot	freshsnap;
 	bool		result;
