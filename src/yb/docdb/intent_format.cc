@@ -113,6 +113,7 @@ Result<DecodeStrongWriteIntentResult> DecodeStrongWriteIntent(
               ? DocHybridTime::kMin
               : DocHybridTime(commit_ht, decoded_intent_value.write_id));
       VLOG(4) << "Transaction id: " << decoded_txn_id
+              << ", intent_prefix: " << result.intent_prefix.ToDebugHexString()
               << ", subtransaction id: " << decoded_subtxn_id
               << ", same transaction: " << result.same_transaction
               << ", value time: " << result.value_time

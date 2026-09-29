@@ -135,7 +135,9 @@ Result<TransactionStatusCache::GetCommitDataResult> TransactionStatusCache::DoGe
       if (txn_status_result.status().IsNotFound()) {
         // We have intent w/o metadata, that means that transaction was already cleaned up or
         // is being retained for CDC.
-        VLOG(4) << "Intent for transaction w/o metadata: " << transaction_id;
+        VLOG(4) << "Intent for transaction w/o metadata: " << transaction_id
+                << ", read_time: " << read_time_
+                << ", cache: " << static_cast<const void*>(this);
         return GetCommitDataResult{
             .transaction_local_state =
                 TransactionLocalState{.commit_ht = HybridTime::kMin, .aborted_subtxn_set = {}},
