@@ -444,8 +444,10 @@ LockRelationIdForSession(LockRelId *relid, LOCKMODE lockmode)
 			elog(FATAL, "expected active txn lock on relid %d, dbid: %d",
 				 relid->relId, relid->dbId);
 		}
-		if (lockmode < ShareUpdateExclusiveLock)
-			elog(ERROR, "expected session lock on relid %d, dbid: %d to be a global object lock",
+		/* RowExclusiveLock is held for the duration of a batched COPY. */
+		if (lockmode < ShareUpdateExclusiveLock && lockmode != RowExclusiveLock)
+			elog(ERROR, "unexpected session lock mode %s on relid %d, dbid: %d",
+				 GetLockmodeName(DEFAULT_LOCKMETHOD, lockmode),
 				 relid->relId, relid->dbId);
 	}
 	(void) LockAcquire(&tag, lockmode, true, false);

@@ -2164,6 +2164,9 @@ void
 YBCommitTransactionIntermediate(void)
 {
 	YBRunWithInitTransactionData(&YBCCommitTransactionIntermediate);
+
+	if (YBGetObjectLockMode() == YB_OBJECT_LOCK_ENABLED)
+		YbReacquireTxnObjectLocks();
 }
 
 /*

@@ -1,0 +1,131 @@
+Parsed test spec with 2 sessions
+
+starting permutation: s1_copy_big s2_wait s2_create_trigger s1_sync s2_triggers s2_counts
+step s1_copy_big: COPY t FROM PROGRAM $$P=$(printf %0300d 0); seq -f "%g,1,$P" 1 400; sleep 8; seq -f "%g,999,$P" 401 800$$ WITH (FORMAT csv, ROWS_PER_TRANSACTION 10); <waiting ...>
+step s2_wait: DO $$ BEGIN WHILE (SELECT count(*) FROM t) < 100 LOOP PERFORM pg_sleep(0.1); COMMIT; END LOOP; END $$;
+step s2_create_trigger: CREATE TRIGGER reject_big_b BEFORE INSERT ON t FOR EACH ROW EXECUTE FUNCTION reject_big_b(); <waiting ...>
+step s1_copy_big: <... completed>
+step s1_sync: SELECT 1;
+?column?
+--------
+       1
+(1 row)
+
+step s2_create_trigger: <... completed>
+step s2_triggers: SELECT tgname FROM pg_trigger WHERE tgrelid = 't'::regclass AND NOT tgisinternal;
+tgname      
+------------
+reject_big_b
+(1 row)
+
+step s2_counts: SELECT b, count(*) FROM t GROUP BY b ORDER BY b;
+  b|count
+---+-----
+  1|  400
+999|  400
+(2 rows)
+
+
+starting permutation: s1_copy_big s2_wait s2_add_check s1_sync s2_constraints s2_counts
+step s1_copy_big: COPY t FROM PROGRAM $$P=$(printf %0300d 0); seq -f "%g,1,$P" 1 400; sleep 8; seq -f "%g,999,$P" 401 800$$ WITH (FORMAT csv, ROWS_PER_TRANSACTION 10); <waiting ...>
+step s2_wait: DO $$ BEGIN WHILE (SELECT count(*) FROM t) < 100 LOOP PERFORM pg_sleep(0.1); COMMIT; END LOOP; END $$;
+step s2_add_check: ALTER TABLE t ADD CONSTRAINT b_small CHECK (b < 100); <waiting ...>
+step s1_copy_big: <... completed>
+step s1_sync: SELECT 1;
+?column?
+--------
+       1
+(1 row)
+
+step s2_add_check: <... completed>
+ERROR:  check constraint "b_small" of relation "t" is violated by some row
+step s2_constraints: SELECT conname, convalidated FROM pg_constraint WHERE conrelid = 't'::regclass AND contype IN ('c', 'f') ORDER BY conname;
+conname|convalidated
+-------+------------
+(0 rows)
+
+step s2_counts: SELECT b, count(*) FROM t GROUP BY b ORDER BY b;
+  b|count
+---+-----
+  1|  400
+999|  400
+(2 rows)
+
+
+starting permutation: s1_copy_null s2_wait s2_set_not_null s1_sync s2_not_null s2_counts
+step s1_copy_null: COPY t FROM PROGRAM $$P=$(printf %0300d 0); seq -f "%g,1,$P" 1 400; sleep 8; seq -f "%g,,$P" 401 800$$ WITH (FORMAT csv, ROWS_PER_TRANSACTION 10); <waiting ...>
+step s2_wait: DO $$ BEGIN WHILE (SELECT count(*) FROM t) < 100 LOOP PERFORM pg_sleep(0.1); COMMIT; END LOOP; END $$;
+step s2_set_not_null: ALTER TABLE t ALTER COLUMN b SET NOT NULL; <waiting ...>
+step s1_copy_null: <... completed>
+step s1_sync: SELECT 1;
+?column?
+--------
+       1
+(1 row)
+
+step s2_set_not_null: <... completed>
+ERROR:  column "b" of relation "t" contains null values
+step s2_not_null: SELECT attnotnull FROM pg_attribute WHERE attrelid = 't'::regclass AND attname = 'b';
+attnotnull
+----------
+f         
+(1 row)
+
+step s2_counts: SELECT b, count(*) FROM t GROUP BY b ORDER BY b;
+b|count
+-+-----
+1|  400
+ |  400
+(2 rows)
+
+
+starting permutation: s1_copy_big s2_wait s2_add_fk s1_sync s2_constraints s2_counts
+step s1_copy_big: COPY t FROM PROGRAM $$P=$(printf %0300d 0); seq -f "%g,1,$P" 1 400; sleep 8; seq -f "%g,999,$P" 401 800$$ WITH (FORMAT csv, ROWS_PER_TRANSACTION 10); <waiting ...>
+step s2_wait: DO $$ BEGIN WHILE (SELECT count(*) FROM t) < 100 LOOP PERFORM pg_sleep(0.1); COMMIT; END LOOP; END $$;
+step s2_add_fk: ALTER TABLE t ADD CONSTRAINT b_fk FOREIGN KEY (b) REFERENCES p (id); <waiting ...>
+step s1_copy_big: <... completed>
+step s1_sync: SELECT 1;
+?column?
+--------
+       1
+(1 row)
+
+step s2_add_fk: <... completed>
+ERROR:  insert or update on table "t" violates foreign key constraint "b_fk"
+step s2_constraints: SELECT conname, convalidated FROM pg_constraint WHERE conrelid = 't'::regclass AND contype IN ('c', 'f') ORDER BY conname;
+conname|convalidated
+-------+------------
+(0 rows)
+
+step s2_counts: SELECT b, count(*) FROM t GROUP BY b ORDER BY b;
+  b|count
+---+-----
+  1|  400
+999|  400
+(2 rows)
+
+
+starting permutation: s1_copy_big s2_wait s2_create_index s1_sync s2_index_check s2_counts
+step s1_copy_big: COPY t FROM PROGRAM $$P=$(printf %0300d 0); seq -f "%g,1,$P" 1 400; sleep 8; seq -f "%g,999,$P" 401 800$$ WITH (FORMAT csv, ROWS_PER_TRANSACTION 10); <waiting ...>
+step s2_wait: DO $$ BEGIN WHILE (SELECT count(*) FROM t) < 100 LOOP PERFORM pg_sleep(0.1); COMMIT; END LOOP; END $$;
+step s2_create_index: CREATE INDEX NONCONCURRENTLY t_b_idx ON t (b); <waiting ...>
+step s1_copy_big: <... completed>
+step s1_sync: SELECT 1;
+?column?
+--------
+       1
+(1 row)
+
+step s2_create_index: <... completed>
+step s2_index_check: SELECT yb_index_check('t_b_idx'::regclass);
+yb_index_check
+--------------
+(0 rows)
+
+step s2_counts: SELECT b, count(*) FROM t GROUP BY b ORDER BY b;
+  b|count
+---+-----
+  1|  400
+999|  400
+(2 rows)
+

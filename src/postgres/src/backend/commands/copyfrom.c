@@ -112,6 +112,10 @@ static char *limit_printout_length(const char *str);
 
 static void ClosePipeFromProgram(CopyFromState cstate);
 
+/* YB declarations */
+static void YbLockRelationsForBatchedCopy(ResultRelInfo *resultRelInfo);
+static void YbUnlockRelationsForBatchedCopy(ResultRelInfo *resultRelInfo);
+
 /*
  * error context callback for COPY FROM
  *
@@ -818,6 +822,9 @@ CopyFrom(CopyFromState cstate)
 			batch_size = cstate->opts.batch_size;
 
 		cstate->opts.batch_size = batch_size;
+
+		if (batch_size > 0)
+			YbLockRelationsForBatchedCopy(target_resultRelInfo);
 	}
 
 	/*
@@ -1432,34 +1439,7 @@ yb_process_more_batches:
 	}
 
 	if (has_more_tuples)
-	{
-		if (cstate->opts.batch_size > 0)
-		{
-			/*
-			 * Re-acquire the relation lock(s) for the new transaction. This is
-			 * necessary because when YB performs batched COPY, it commits the
-			 * intermediate transaction, resulting in release of all the object
-			 * locks associated with that transaction.
-			 *
-			 * It still doesn't resolve the problem fully as a ddl could have
-			 * changed the schema and 'cstate' would need to be computed again,
-			 * without which the subsequent batches may fail. Nevertheless,
-			 * acquire locks to gate ddls for the duration of the batch.
-			 *
-			 * TODO(#27120): Once session level object locking is supported, we
-			 * could acquire session locks and skip transactional object locks
-			 * all together, leaving no window for DDLs to come in between
-			 * internal batches of COPY execution.
-			 */
-			LockRelation(resultRelInfo->ri_RelationDesc, RowExclusiveLock);
-			for (int i = 0; i < resultRelInfo->ri_NumIndices; ++i)
-			{
-				LockRelation(resultRelInfo->ri_IndexRelationDescs[i],
-							 RowExclusiveLock);
-			}
-		}
 		goto yb_process_more_batches;
-	}
 
 yb_no_more_tuples:
 	/* Flush any remaining buffered tuples */
@@ -1498,6 +1478,10 @@ yb_no_more_tuples:
 	/* Close all the partitioned tables, leaf partitions, and their indices */
 	if (proute)
 		ExecCleanupTupleRouting(mtstate, proute);
+
+	/* YB */
+	if (cstate->opts.batch_size > 0)
+		YbUnlockRelationsForBatchedCopy(target_resultRelInfo);
 
 	/* Close the result relations, including any trigger target relations */
 	ExecCloseResultRelations(estate);
@@ -1976,4 +1960,44 @@ ClosePipeFromProgram(CopyFromState cstate)
 						cstate->filename),
 				 errdetail_internal("%s", wait_result_to_str(pclose_rc))));
 	}
+}
+
+/*
+ * Batched COPY commits a YB transaction per batch, which releases the
+ * transaction's object locks in DocDB while PG's local lock table still
+ * records them as held, so re-locking per batch is a no-op.  Hold the locks at
+ * session level for the whole COPY instead, so that no DDL can commit between
+ * batches and invalidate the ResultRelInfo built once at the start.
+ *
+ * Partitions are opened lazily during tuple routing and are not covered.
+ */
+static void
+YbLockRelationsForBatchedCopy(ResultRelInfo *resultRelInfo)
+{
+	if (YBGetObjectLockMode() != YB_OBJECT_LOCK_ENABLED)
+		return;
+
+	LockRelationIdForSession(&resultRelInfo->ri_RelationDesc->rd_lockInfo.lockRelId,
+							 RowExclusiveLock);
+	for (int i = 0; i < resultRelInfo->ri_NumIndices; ++i)
+		LockRelationIdForSession(&resultRelInfo->ri_IndexRelationDescs[i]->rd_lockInfo.lockRelId,
+								 RowExclusiveLock);
+}
+
+/*
+ * Every batch, including the last one, has been committed by now, so the
+ * statement's transaction has no writes left to protect.  On error, the
+ * session locks are released by transaction abort instead.
+ */
+static void
+YbUnlockRelationsForBatchedCopy(ResultRelInfo *resultRelInfo)
+{
+	if (YBGetObjectLockMode() != YB_OBJECT_LOCK_ENABLED)
+		return;
+
+	for (int i = 0; i < resultRelInfo->ri_NumIndices; ++i)
+		UnlockRelationIdForSession(&resultRelInfo->ri_IndexRelationDescs[i]->rd_lockInfo.lockRelId,
+								   RowExclusiveLock);
+	UnlockRelationIdForSession(&resultRelInfo->ri_RelationDesc->rd_lockInfo.lockRelId,
+							   RowExclusiveLock);
 }

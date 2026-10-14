@@ -392,6 +392,58 @@ GetYbObjectLockId(const LOCKTAG *locktag)
 	};
 }
 
+static void
+YbAcquireObjectLockOnTserver(LockMethod lockMethodTable, const LOCKTAG *locktag,
+							 LOCKMODE lockmode, bool sessionLock)
+{
+	int			log_level = (locktag->locktag_field2 >= FirstNormalObjectId) ?
+		((lockmode >= ShareUpdateExclusiveLock) ? DEBUG1 : DEBUG2) : DEBUG4;
+
+	elog(log_level, "LockAcquire start: lock [%u,%u] mode: %s",
+		 locktag->locktag_field1, locktag->locktag_field2, lockMethodTable->lockModeNames[lockmode]);
+
+	/*
+	 * With lock_timeout disabled, pggate still bounds the acquisition, but nothing armed a
+	 * timer to report that bound: it expired as a transport deadline, so a statement blocked on
+	 * a conflicting lock failed with an RPC or shared-memory timeout naming neither the lock nor
+	 * the holder. Arm postgres' timer just inside pggate's deadline so the statement is
+	 * cancelled with "canceling statement due to lock timeout" instead. The wait is unchanged.
+	 *
+	 * Bootstrap mode is excluded: BootstrapModeMain never calls InitializeTimeouts, so touching
+	 * LOCK_TIMEOUT there is a FATAL.
+	 */
+	int			lock_timeout_ms = LockTimeout;
+
+	if (lock_timeout_ms <= 0 && !IsBootstrapProcessingMode())
+	{
+		int			rpc_timeout_ms = YBCGetDefaultRpcTimeoutMs();
+
+		/*
+		 * Reserve time ("slack") for pggate to report lock error messages before
+		 * the RPC deadline expires.
+		 *
+		 * We cap the slack at 2000 ms (matching pg_client_extra_timeout_ms), or half
+		 * the total RPC deadline if the deadline is under 4 seconds.
+		 */
+		int			slack_ms = Min(2000, rpc_timeout_ms / 2);
+
+		lock_timeout_ms = rpc_timeout_ms - slack_ms;
+	}
+
+	if (lock_timeout_ms > 0)
+		enable_timeout_after(LOCK_TIMEOUT, lock_timeout_ms);
+
+	HandleYBStatus(YBCAcquireObjectLock(GetYbObjectLockId(locktag), (YbcObjectLockMode) lockmode, sessionLock));
+
+	if (lock_timeout_ms > 0)
+		disable_timeout(LOCK_TIMEOUT, false);
+
+	CHECK_FOR_INTERRUPTS();
+
+	elog(log_level, "LockAcquired: lock [%u,%u] mode: %s",
+		 locktag->locktag_field1, locktag->locktag_field2, lockMethodTable->lockModeNames[lockmode]);
+}
+
 int
 YbNumSessionObjectLocks()
 {
@@ -987,52 +1039,7 @@ LockAcquireExtended(const LOCKTAG *locktag,
 		 * non-shared structure and return. This makes subsequent redundant
 		 * lock requests equivalent to a no-op.
 		 */
-		int			log_level = (locktag->locktag_field2 >= FirstNormalObjectId) ?
-			((lockmode >= ShareUpdateExclusiveLock) ? DEBUG1 : DEBUG2) : DEBUG4;
-
-		elog(log_level, "LockAcquire start: lock [%u,%u] mode: %s",
-			 locktag->locktag_field1, locktag->locktag_field2, lockMethodTable->lockModeNames[lockmode]);
-
-		/*
-		 * With lock_timeout disabled, pggate still bounds the acquisition, but nothing armed a
-		 * timer to report that bound: it expired as a transport deadline, so a statement blocked on
-		 * a conflicting lock failed with an RPC or shared-memory timeout naming neither the lock nor
-		 * the holder. Arm postgres' timer just inside pggate's deadline so the statement is
-		 * cancelled with "canceling statement due to lock timeout" instead. The wait is unchanged.
-		 *
-		 * Bootstrap mode is excluded: BootstrapModeMain never calls InitializeTimeouts, so touching
-		 * LOCK_TIMEOUT there is a FATAL.
-		 */
-		int			lock_timeout_ms = LockTimeout;
-
-		if (lock_timeout_ms <= 0 && !IsBootstrapProcessingMode())
-		{
-			int			rpc_timeout_ms = YBCGetDefaultRpcTimeoutMs();
-
-			/*
-			 * Reserve time ("slack") for pggate to report lock error messages before
-			 * the RPC deadline expires.
-			 *
-			 * We cap the slack at 2000 ms (matching pg_client_extra_timeout_ms), or half
-			 * the total RPC deadline if the deadline is under 4 seconds.
-			 */
-			int			slack_ms = Min(2000, rpc_timeout_ms / 2);
-
-			lock_timeout_ms = rpc_timeout_ms - slack_ms;
-		}
-
-		if (lock_timeout_ms > 0)
-			enable_timeout_after(LOCK_TIMEOUT, lock_timeout_ms);
-
-		HandleYBStatus(YBCAcquireObjectLock(GetYbObjectLockId(locktag), (YbcObjectLockMode) lockmode, sessionLock));
-
-		if (lock_timeout_ms > 0)
-			disable_timeout(LOCK_TIMEOUT, false);
-
-		CHECK_FOR_INTERRUPTS();
-
-		elog(log_level, "LockAcquired: lock [%u,%u] mode: %s",
-			 locktag->locktag_field1, locktag->locktag_field2, lockMethodTable->lockModeNames[lockmode]);
+		YbAcquireObjectLockOnTserver(lockMethodTable, locktag, lockmode, sessionLock);
 		GrantLockLocal(locallock, owner);
 		return LOCKACQUIRE_OK;
 	}
@@ -5086,6 +5093,55 @@ YbLockHeldOnObjectBySession(const LOCKTAG *locktag)
 		}
 	}
 	return false;
+}
+
+/*
+ * After an intermediate commit of the YB transaction (see
+ * YBCommitTransactionIntermediate), DocDB no longer holds the transactional
+ * object locks that the local lock table still records, and later requests
+ * for them never reach the tserver. Re-acquire them in the new YB transaction
+ * so that the local lock table stays truthful. The local counts are left
+ * alone: callers such as ExecCloseIndices release these locks by mode later
+ * on.
+ */
+void
+YbReacquireTxnObjectLocks(void)
+{
+	HASH_SEQ_STATUS status;
+	LOCALLOCK  *locallock;
+	List	   *tags = NIL;
+	ListCell   *lc;
+
+	Assert(YBGetObjectLockMode() == YB_OBJECT_LOCK_ENABLED);
+
+	/* Copy the tags first: acquiring can process interrupts. */
+	hash_seq_init(&status, LockMethodLocalHash);
+	while ((locallock = (LOCALLOCK *) hash_seq_search(&status)) != NULL)
+	{
+		if (locallock->nLocks <= 0 ||
+			LOCALLOCK_LOCKMETHOD(*locallock) != DEFAULT_LOCKMETHOD)
+			continue;
+		for (int i = 0; i < locallock->numLockOwners; i++)
+		{
+			if (locallock->lockOwners[i].owner != NULL)
+			{
+				LOCALLOCKTAG *tag = palloc(sizeof(LOCALLOCKTAG));
+
+				*tag = locallock->tag;
+				tags = lappend(tags, tag);
+				break;
+			}
+		}
+	}
+
+	foreach(lc, tags)
+	{
+		LOCALLOCKTAG *tag = (LOCALLOCKTAG *) lfirst(lc);
+
+		YbAcquireObjectLockOnTserver(LockMethods[DEFAULT_LOCKMETHOD],
+									 &tag->lock, tag->mode, false);
+	}
+	list_free_deep(tags);
 }
 
 #ifdef USE_ASSERT_CHECKING
